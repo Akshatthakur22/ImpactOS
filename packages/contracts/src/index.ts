@@ -8,6 +8,7 @@ export const PermissionSchema = z.enum([
   "students:read",
   "students:write",
   "admissions:manage",
+  "academy:manage",
   "batches:read",
   "attendance:manage",
   "payments:read",
@@ -15,6 +16,8 @@ export const PermissionSchema = z.enum([
   "reports:read",
   "settings:manage",
   "users:manage",
+  "announcements:manage",
+  "expenses:manage",
   "coaches:read",
   "coaches:write",
   "schedules:read",
@@ -32,8 +35,94 @@ export const PublicUserSchema = z.object({
   displayName: z.string().min(1),
   role: UserRoleSchema,
   academyName: z.string().min(1),
+  academyTimezone: z.string().min(1).optional(),
+  permissions: z.array(PermissionSchema).optional(),
 });
 export type PublicUser = z.infer<typeof PublicUserSchema>;
+
+export const StaffMemberSchema = z.object({
+  id: z.string().uuid(),
+  email: z.string().email(),
+  displayName: z.string().min(1),
+  isActive: z.boolean(),
+  permissions: z.array(PermissionSchema),
+  createdAt: z.string().datetime(),
+});
+export type StaffMember = z.infer<typeof StaffMemberSchema>;
+export const StaffListResponseSchema = z.object({ staff: z.array(StaffMemberSchema) });
+
+export const CreateStaffRequestSchema = z
+  .object({
+    email: z.string().trim().email().max(254).toLowerCase(),
+    displayName: z.string().trim().min(1).max(160),
+    initialPassword: z.string().min(14).max(256),
+    permissions: z.array(PermissionSchema).max(24),
+  })
+  .refine((value) => new Set(value.permissions).size === value.permissions.length, {
+    message: "Choose each permission only once.",
+    path: ["permissions"],
+  });
+export type CreateStaffRequest = z.infer<typeof CreateStaffRequestSchema>;
+
+export const UpdateStaffRequestSchema = z
+  .object({
+    displayName: z.string().trim().min(1).max(160).optional(),
+    isActive: z.boolean().optional(),
+    permissions: z.array(PermissionSchema).max(24).optional(),
+  })
+  .refine(
+    (value) => !value.permissions || new Set(value.permissions).size === value.permissions.length,
+    { message: "Choose each permission only once.", path: ["permissions"] },
+  )
+  .refine((value) => Object.keys(value).length > 0, "At least one field is required.");
+export type UpdateStaffRequest = z.infer<typeof UpdateStaffRequestSchema>;
+
+export const PasswordResetRequestSchema = z.object({
+  email: z.string().trim().email().max(254).toLowerCase(),
+});
+export type PasswordResetRequest = z.infer<typeof PasswordResetRequestSchema>;
+
+export const PasswordResetConfirmSchema = z.object({
+  token: z.string().min(32).max(128),
+  password: z.string().min(14).max(256),
+});
+export type PasswordResetConfirm = z.infer<typeof PasswordResetConfirmSchema>;
+
+export const PushDeviceRequestSchema = z.object({
+  token: z
+    .string()
+    .regex(/^(?:Expo|Exponent)PushToken\[[A-Za-z0-9_-]+\]$/)
+    .max(255),
+  platform: z.enum(["ios", "android"]),
+});
+export type PushDeviceRequest = z.infer<typeof PushDeviceRequestSchema>;
+
+export const RecordProgressRequestSchema = z
+  .object({
+    studentId: z.string().uuid(),
+    assessmentName: z.string().trim().min(2).max(100),
+    value: z.string().trim().max(120).optional(),
+    coachNote: z.string().trim().max(1000).optional(),
+    parentVisible: z.boolean().default(false),
+  })
+  .refine((item) => Boolean(item.value || item.coachNote), "Add a result or a coach note.");
+export type RecordProgressRequest = z.infer<typeof RecordProgressRequestSchema>;
+
+export const ProgressEntrySchema = z.object({
+  id: z.string().uuid(),
+  studentId: z.string().uuid(),
+  studentName: z.string(),
+  sessionId: z.string().uuid(),
+  batchName: z.string(),
+  sportName: z.string(),
+  assessmentName: z.string(),
+  value: z.string().nullable(),
+  coachNote: z.string().nullable(),
+  parentVisible: z.boolean(),
+  coachName: z.string(),
+  createdAt: z.string().datetime(),
+});
+export type ProgressEntry = z.infer<typeof ProgressEntrySchema>;
 
 export const ClientTypeSchema = z.enum(["web", "mobile"]);
 export type ClientType = z.infer<typeof ClientTypeSchema>;
@@ -244,6 +333,115 @@ export const StudentSchema = z.object({
 });
 export type Student = z.infer<typeof StudentSchema>;
 
+export const InquiryStatusSchema = z.enum([
+  "new",
+  "contacted",
+  "follow_up",
+  "trial_scheduled",
+  "converted",
+  "lost",
+]);
+export type InquiryStatus = z.infer<typeof InquiryStatusSchema>;
+
+export const InquiryActivityTypeSchema = z.enum([
+  "note",
+  "call",
+  "message",
+  "visit",
+  "trial",
+  "status_change",
+  "conversion",
+]);
+export type InquiryActivityType = z.infer<typeof InquiryActivityTypeSchema>;
+
+export const InquiryActivitySchema = z.object({
+  id: z.string().uuid(),
+  type: InquiryActivityTypeSchema,
+  note: z.string().min(1),
+  statusBefore: InquiryStatusSchema.nullable(),
+  statusAfter: InquiryStatusSchema.nullable(),
+  nextFollowUpAt: z.string().datetime().nullable(),
+  createdByName: z.string().min(1),
+  createdAt: z.string().datetime(),
+});
+export type InquiryActivity = z.infer<typeof InquiryActivitySchema>;
+
+export const InquirySchema = z.object({
+  id: z.string().uuid(),
+  studentFirstName: z.string().min(1),
+  studentLastName: z.string().min(1),
+  contactName: z.string().min(1),
+  contactEmail: z.string().email().nullable(),
+  contactPhone: z.string().nullable(),
+  relationship: z.string().min(1),
+  source: z.string().min(1),
+  sourceDetail: z.string().nullable(),
+  programId: z.string().uuid().nullable(),
+  programName: z.string().nullable(),
+  status: InquiryStatusSchema,
+  notes: z.string().nullable(),
+  nextFollowUpAt: z.string().datetime().nullable(),
+  convertedStudentId: z.string().uuid().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+  activities: z.array(InquiryActivitySchema).optional(),
+});
+export type Inquiry = z.infer<typeof InquirySchema>;
+
+const InquiryNameSchema = z.string().trim().min(1).max(80);
+export const CreateInquiryRequestSchema = z
+  .object({
+    studentFirstName: InquiryNameSchema,
+    studentLastName: InquiryNameSchema,
+    contactName: z.string().trim().min(1).max(120),
+    contactEmail: z.string().trim().email().max(254).toLowerCase().optional(),
+    contactPhone: z.string().trim().min(7).max(30).optional(),
+    relationship: z.string().trim().min(1).max(40).default("Parent"),
+    source: z.string().trim().min(1).max(120),
+    sourceDetail: z.string().trim().max(240).optional(),
+    programId: z.string().uuid().optional(),
+    notes: z.string().trim().max(4000).optional(),
+    nextFollowUpAt: z.string().datetime().optional(),
+  })
+  .refine((value) => value.contactEmail || value.contactPhone, {
+    message: "Add an email address or phone number so the contact can be reached.",
+    path: ["contactPhone"],
+  });
+export type CreateInquiryRequest = z.infer<typeof CreateInquiryRequestSchema>;
+
+export const InquiryListQuerySchema = z.object({
+  search: z.string().trim().max(120).optional(),
+  status: InquiryStatusSchema.optional(),
+  source: z.string().trim().max(120).optional(),
+  followUp: z.enum(["due", "upcoming", "none"]).optional(),
+  offset: z.coerce.number().int().min(0).default(0),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+});
+export type InquiryListQuery = z.infer<typeof InquiryListQuerySchema>;
+export type InquiryListQueryInput = z.input<typeof InquiryListQuerySchema>;
+
+export const AddInquiryActivityRequestSchema = z.object({
+  type: z.enum(["note", "call", "message", "visit", "trial"]),
+  note: z.string().trim().min(1).max(4000),
+  status: z.enum(["new", "contacted", "follow_up", "trial_scheduled", "lost"]).optional(),
+  nextFollowUpAt: z.string().datetime().nullable().optional(),
+});
+export type AddInquiryActivityRequest = z.infer<typeof AddInquiryActivityRequestSchema>;
+
+export const ConvertInquiryRequestSchema = z.object({ batchId: z.string().uuid().optional() });
+export type ConvertInquiryRequest = z.infer<typeof ConvertInquiryRequestSchema>;
+
+export const ConvertedInquirySchema = z.object({ studentId: z.string().uuid() });
+export type ConvertedInquiry = z.infer<typeof ConvertedInquirySchema>;
+
+export const InquiryListSchema = z.object({
+  inquiries: z.array(InquirySchema),
+  total: z.number().int().nonnegative(),
+  offset: z.number().int().nonnegative(),
+  limit: z.number().int().positive(),
+});
+export type InquiryList = z.infer<typeof InquiryListSchema>;
+
 export const GuardianInviteSchema = z.object({
   token: z.string().min(32),
   email: z.string().email(),
@@ -390,16 +588,22 @@ export type UpdateAcademySettingsRequest = z.infer<typeof UpdateAcademySettingsR
 export const AnnouncementAudienceSchema = z.enum(["everyone", "parents", "coaches"]);
 export type AnnouncementAudience = z.infer<typeof AnnouncementAudienceSchema>;
 
-export const CreateAnnouncementRequestSchema = z.object({
-  title: z.string().trim().min(1).max(160),
-  body: z.string().trim().min(1).max(4000),
-  audience: AnnouncementAudienceSchema,
-  batchId: z.string().uuid().nullable(),
-}).superRefine((value, context) => {
-  if (value.audience === "everyone" && value.batchId) {
-    context.addIssue({ code: "custom", path: ["batchId"], message: "Everyone notices cannot target one batch." });
-  }
-});
+export const CreateAnnouncementRequestSchema = z
+  .object({
+    title: z.string().trim().min(1).max(160),
+    body: z.string().trim().min(1).max(4000),
+    audience: AnnouncementAudienceSchema,
+    batchId: z.string().uuid().nullable(),
+  })
+  .superRefine((value, context) => {
+    if (value.audience === "everyone" && value.batchId) {
+      context.addIssue({
+        code: "custom",
+        path: ["batchId"],
+        message: "Everyone notices cannot target one batch.",
+      });
+    }
+  });
 export type CreateAnnouncementRequest = z.infer<typeof CreateAnnouncementRequestSchema>;
 
 export const AnnouncementStatusSchema = z.enum(["draft", "published", "archived"]);
@@ -721,20 +925,38 @@ export const ScheduleSchema = z.object({
 });
 export type Schedule = z.infer<typeof ScheduleSchema>;
 
+const ScheduleRequestShape = {
+  batchId: z.string().uuid(),
+  branchId: z.string().uuid().nullable().optional(),
+  dayOfWeek: z.number().int().min(0).max(6),
+  startTime: LocalTimeSchema,
+  endTime: LocalTimeSchema,
+  venue: z.string().trim().max(160).optional(),
+};
+
 export const CreateScheduleRequestSchema = z
-  .object({
-    batchId: z.string().uuid(),
-    branchId: z.string().uuid().nullable().optional(),
-    dayOfWeek: z.number().int().min(0).max(6),
-    startTime: LocalTimeSchema,
-    endTime: LocalTimeSchema,
-    venue: z.string().trim().max(160).optional(),
-  })
+  .object(ScheduleRequestShape)
   .refine((schedule) => schedule.startTime < schedule.endTime, {
     path: ["endTime"],
     message: "End time must be after start time.",
   });
 export type CreateScheduleRequest = z.infer<typeof CreateScheduleRequestSchema>;
+
+export const UpdateScheduleRequestSchema = z
+  .object({ ...ScheduleRequestShape, isActive: z.boolean().optional() })
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, "At least one field is required")
+  .refine((value) => !value.startTime || !value.endTime || value.startTime < value.endTime, {
+    path: ["endTime"],
+    message: "End time must be after start time.",
+  });
+export type UpdateScheduleRequest = z.infer<typeof UpdateScheduleRequestSchema>;
+
+export const GenerateSessionsRequestSchema = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+export type GenerateSessionsRequest = z.infer<typeof GenerateSessionsRequestSchema>;
 
 export const CreateSessionRequestSchema = z.object({
   startsAt: z.string().datetime(),
@@ -742,12 +964,16 @@ export const CreateSessionRequestSchema = z.object({
 });
 export type CreateSessionRequest = z.infer<typeof CreateSessionRequestSchema>;
 
+export const RescheduleSessionRequestSchema = CreateSessionRequestSchema;
+export type RescheduleSessionRequest = z.infer<typeof RescheduleSessionRequestSchema>;
+
 export const SessionStatusSchema = z.enum(["scheduled", "completed", "cancelled"]);
 export type SessionStatus = z.infer<typeof SessionStatusSchema>;
 
 export const TrainingSessionSchema = z.object({
   id: z.string().uuid(),
   batchId: z.string().uuid(),
+  scheduleId: z.string().uuid().nullable().optional(),
   batchName: z.string().min(1),
   branchName: z.string().nullable(),
   startsAt: z.string().datetime(),
@@ -756,6 +982,13 @@ export const TrainingSessionSchema = z.object({
   status: SessionStatusSchema,
 });
 export type TrainingSession = z.infer<typeof TrainingSessionSchema>;
+
+export const CoachStudentSchema = z.object({
+  studentId: z.string().uuid(),
+  studentName: z.string().min(1),
+  batches: z.array(z.object({ id: z.string().uuid(), name: z.string().min(1) })),
+});
+export type CoachStudent = z.infer<typeof CoachStudentSchema>;
 
 export const AttendanceStatusSchema = z.enum(["present", "absent", "late", "excused"]);
 export type AttendanceStatus = z.infer<typeof AttendanceStatusSchema>;
@@ -783,6 +1016,7 @@ export type AttendanceRecord = z.infer<typeof AttendanceRecordSchema>;
 export const AdminAttendanceEntrySchema = z.object({
   id: z.string().uuid(),
   sessionId: z.string().uuid(),
+  batchId: z.string().uuid(),
   studentId: z.string().uuid(),
   studentName: z.string().min(1),
   batchName: z.string().min(1),
@@ -794,6 +1028,19 @@ export const AdminAttendanceEntrySchema = z.object({
   correctionCount: z.number().int().min(0),
 });
 export type AdminAttendanceEntry = z.infer<typeof AdminAttendanceEntrySchema>;
+
+export const AttendanceSessionSummarySchema = z.object({
+  id: z.string().uuid(),
+  batchId: z.string().uuid(),
+  batchName: z.string().min(1),
+  branchName: z.string().nullable(),
+  startsAt: z.string().datetime(),
+  endsAt: z.string().datetime(),
+  status: SessionStatusSchema,
+  expectedCount: z.number().int().nonnegative(),
+  markedCount: z.number().int().nonnegative(),
+});
+export type AttendanceSessionSummary = z.infer<typeof AttendanceSessionSummarySchema>;
 
 export const AttendanceCorrectionEntrySchema = z.object({
   id: z.string().uuid(),

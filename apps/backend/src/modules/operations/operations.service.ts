@@ -4,7 +4,10 @@ import type {
   CreateScheduleRequest,
   CreateSessionRequest,
   CorrectAttendanceRequest,
+  GenerateSessionsRequest,
   RecordAttendanceRequest,
+  RescheduleSessionRequest,
+  UpdateScheduleRequest,
   UpdateCoachRequest,
   UpdateAcademyBranchRequest,
 } from "@sportdesk/contracts";
@@ -36,6 +39,13 @@ function translateError(error: unknown): never {
     }
     if (error.code === "SESSION_CLOSED") {
       throw new OperationsError(409, error.code, "Attendance is closed for this session.");
+    }
+    if (error.code === "SESSION_NOT_RESCHEDULABLE") {
+      throw new OperationsError(
+        409,
+        error.code,
+        "Only scheduled sessions without attendance can be changed or cancelled.",
+      );
     }
     if (error.code === "ATTENDANCE_INCOMPLETE") {
       throw new OperationsError(
@@ -84,7 +94,9 @@ export function createOperationsService(repository: OperationsRepository) {
       return repository.listBranches(academyId);
     },
 
-    async createBranch(input: CreateAcademyBranchRequest & { academyId: string; createdBy: string }) {
+    async createBranch(
+      input: CreateAcademyBranchRequest & { academyId: string; createdBy: string },
+    ) {
       try {
         return await repository.createBranch(input);
       } catch (error) {
@@ -151,13 +163,89 @@ export function createOperationsService(repository: OperationsRepository) {
       return repository.listSchedules(academyId);
     },
 
-    async listAttendance(academyId: string, from: Date, to: Date) {
-      const records = await repository.listAttendance(academyId, from, to);
+    async updateSchedule(input: {
+      academyId: string;
+      scheduleId: string;
+      changes: UpdateScheduleRequest;
+    }) {
+      try {
+        return await repository.updateSchedule(input);
+      } catch (error) {
+        translateError(error);
+      }
+    },
+
+    async generateSessions(
+      input: GenerateSessionsRequest & { academyId: string; createdBy: string },
+    ) {
+      const from = new Date(`${input.from}T00:00:00.000Z`);
+      const to = new Date(`${input.to}T00:00:00.000Z`);
+      if (
+        Number.isNaN(from.getTime()) ||
+        Number.isNaN(to.getTime()) ||
+        from.toISOString().slice(0, 10) !== input.from ||
+        to.toISOString().slice(0, 10) !== input.to ||
+        from > to ||
+        (to.getTime() - from.getTime()) / 86_400_000 > 89
+      ) {
+        throw new OperationsError(
+          400,
+          "INVALID_GENERATION_RANGE",
+          "Choose a valid date range of no more than 90 days.",
+        );
+      }
+      try {
+        return await repository.generateSessions(input);
+      } catch (error) {
+        translateError(error);
+      }
+    },
+
+    async listSessions(academyId: string, from: Date, to: Date) {
+      const sessions = await repository.listSessions(academyId, from, to);
+      return sessions.map((session) => ({
+        ...session,
+        startsAt: isoDate(session.startsAt),
+        endsAt: isoDate(session.endsAt),
+      }));
+    },
+
+    async rescheduleSession(
+      input: RescheduleSessionRequest & { academyId: string; sessionId: string },
+    ) {
+      try {
+        const session = await repository.updateSession({
+          ...input,
+          startsAt: new Date(input.startsAt),
+          endsAt: new Date(input.endsAt),
+        });
+        return { ...session, startsAt: isoDate(session.startsAt), endsAt: isoDate(session.endsAt) };
+      } catch (error) {
+        translateError(error);
+      }
+    },
+
+    async cancelSession(input: { academyId: string; sessionId: string }) {
+      try {
+        const session = await repository.updateSession({ ...input, cancel: true });
+        return { ...session, startsAt: isoDate(session.startsAt), endsAt: isoDate(session.endsAt) };
+      } catch (error) {
+        translateError(error);
+      }
+    },
+
+    async listAttendance(academyId: string, from: Date, to: Date, filters?: { batchId?: string; recordedBy?: string }) {
+      const records = await repository.listAttendance(academyId, from, to, filters);
       return records.map((record) => ({
         ...record,
         scheduledStart: isoDate(record.scheduledStart),
         recordedAt: isoDate(record.recordedAt),
       }));
+    },
+
+    async listAttendanceSessions(academyId: string, from: Date, to: Date, batchId?: string) {
+      const sessions = await repository.listAttendanceSessions(academyId, from, to, batchId);
+      return sessions.map((session) => ({ ...session, startsAt: isoDate(session.startsAt), endsAt: isoDate(session.endsAt) }));
     },
 
     async listAttendanceCorrections(academyId: string, attendanceId: string) {
@@ -222,6 +310,10 @@ export function createOperationsService(repository: OperationsRepository) {
         startsAt: isoDate(session.startsAt),
         endsAt: isoDate(session.endsAt),
       }));
+    },
+
+    async listCoachStudents(academyId: string, userId: string) {
+      return repository.listCoachStudents(academyId, userId);
     },
 
     async getSessionRoster(academyId: string, sessionId: string, userId: string) {

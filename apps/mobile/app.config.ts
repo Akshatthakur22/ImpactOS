@@ -7,7 +7,10 @@ const configValue: ExpoConfig = {
   version: "0.1.0",
   orientation: "portrait",
   userInterfaceStyle: "light",
-  plugins: ["expo-router", "expo-secure-store", "expo-status-bar"],
+  plugins: ["expo-router", "expo-secure-store", "expo-status-bar", "expo-notifications"],
+  ...(process.env.EXPO_PUBLIC_EAS_PROJECT_ID
+    ? { extra: { eas: { projectId: process.env.EXPO_PUBLIC_EAS_PROJECT_ID } } }
+    : {}),
   experiments: { typedRoutes: true },
 };
 

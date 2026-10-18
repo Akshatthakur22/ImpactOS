@@ -117,8 +117,12 @@ export function createAnnouncementsService(repository: AnnouncementsRepository) 
       if (!announcements.some((announcement) => announcement.id === input.announcementId)) {
         throw new AnnouncementError(404, "ANNOUNCEMENT_NOT_FOUND", "The announcement was not found.");
       }
-      const { role: _role, ...readInput } = input;
-      return repository.markRead({ ...readInput, now: new Date() });
+      return repository.markRead({
+        academyId: input.academyId,
+        userId: input.userId,
+        announcementId: input.announcementId,
+        now: new Date(),
+      });
     },
   };
 }

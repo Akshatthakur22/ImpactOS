@@ -44,6 +44,24 @@ export async function loginWithPassword(email: string, password: string) {
   return ApiSuccessSchema(AuthDataSchema).parse(await response.json()).data;
 }
 
+export async function requestPasswordReset(email: string) {
+  const response = await fetch(`${API_BASE}/auth/password-reset/request`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  if (!response.ok) throw new ApiRequestError(await readError(response), response.status);
+}
+
+export async function confirmPasswordReset(token: string, password: string) {
+  const response = await fetch(`${API_BASE}/auth/password-reset/confirm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, password }),
+  });
+  if (!response.ok) throw new ApiRequestError(await readError(response), response.status);
+}
+
 async function requestWebSessionRefresh(): Promise<AuthData | null> {
   const response = await fetch(`${API_BASE}/auth/refresh`, {
     method: "POST",

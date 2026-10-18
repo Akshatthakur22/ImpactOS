@@ -18,6 +18,8 @@ function makeHarness(role: UserWithAcademy["role"] = "owner") {
     role,
     isActive: true,
     academyName: "Impact Fit Academy",
+    academyTimezone: "Asia/Kolkata",
+    permissions: [],
   };
   const sessions = new Map<
     string,

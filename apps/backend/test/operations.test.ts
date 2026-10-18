@@ -6,6 +6,8 @@ import request from "supertest";
 import type { PublicUser } from "@sportdesk/contracts";
 import type { Database } from "../src/db/client.js";
 import { createOperationsRepository } from "../src/db/operations.repository.js";
+import { createProgressRepository } from "../src/db/progress.repository.js";
+import { createProgressService } from "../src/modules/progress/progress.service.js";
 import { createOperationsService } from "../src/modules/operations/operations.service.js";
 import { createApp } from "../src/app.js";
 import type { SportDeskAuthService } from "../src/modules/auth/auth.service.js";
@@ -33,6 +35,7 @@ describe("Phase 1 operations API", () => {
   const app = (() => {
     const database = drizzlePGlite(client) as unknown as Database;
     const operations = createOperationsService(createOperationsRepository(database));
+    const progress = createProgressService(createProgressRepository(database));
     const auth = {
       async authenticate(token: string) {
         if (token === "owner-token") return owner;
@@ -43,6 +46,7 @@ describe("Phase 1 operations API", () => {
     return createApp({
       auth,
       operations,
+      progress,
       webOrigin,
       secureCookies: false,
       sessionTtlDays: 30,
@@ -154,11 +158,55 @@ describe("Phase 1 operations API", () => {
     expect(coachSessions.status).toBe(200);
     expect(coachSessions.body.data.sessions).toHaveLength(1);
 
+    const coachStudents = await request(app)
+      .get("/api/v1/coach/me/students")
+      .set("Authorization", "Bearer coach-token");
+    expect(coachStudents.status).toBe(200);
+    expect(coachStudents.body.data.students).toEqual([
+      {
+        studentId,
+        studentName: "Aarav Student",
+        batches: [{ id: batchId, name: "Morning group" }],
+      },
+      {
+        studentId: secondStudentId,
+        studentName: "Mira Student",
+        batches: [{ id: batchId, name: "Morning group" }],
+      },
+    ]);
+    const ownerCannotUseCoachRoster = await request(app)
+      .get("/api/v1/coach/me/students")
+      .set("Authorization", "Bearer owner-token");
+    expect(ownerCannotUseCoachRoster.status).toBe(403);
+
     const roster = await request(app)
       .get(`/api/v1/coach/sessions/${session.body.data.id}/roster`)
       .set("Authorization", "Bearer coach-token");
     expect(roster.status).toBe(200);
     expect(roster.body.data.students).toHaveLength(2);
+
+    const progressEntry = await request(app)
+      .post(`/api/v1/coach/sessions/${session.body.data.id}/progress`)
+      .set("Authorization", "Bearer coach-token")
+      .send({
+        studentId,
+        assessmentName: "Sprint acceleration",
+        value: "Improving",
+        coachNote: "Good drive phase",
+        parentVisible: true,
+      });
+    expect(progressEntry.status).toBe(201);
+    const progressReview = await request(app)
+      .get("/api/v1/progress")
+      .set("Authorization", "Bearer owner-token");
+    expect(progressReview.status).toBe(200);
+    expect(progressReview.body.data.entries[0]).toMatchObject({
+      studentId,
+      sportName: "Wushu",
+      assessmentName: "Sprint acceleration",
+      value: "Improving",
+      parentVisible: true,
+    });
 
     const attendance = await request(app)
       .put(`/api/v1/coach/sessions/${session.body.data.id}/attendance`)
@@ -243,5 +291,86 @@ describe("Phase 1 operations API", () => {
       .get("/api/v1/coach/sessions/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/roster")
       .set("Authorization", "Bearer coach-token");
     expect(response.status).toBe(403);
+  });
+
+  it("generates idempotent academy-timezone occurrences and manages schedules and sessions safely", async () => {
+    const schedule = await request(app)
+      .post("/api/v1/schedules")
+      .set("Authorization", "Bearer owner-token")
+      .send({ batchId, dayOfWeek: 2, startTime: "09:00", endTime: "10:00", venue: "Studio B" });
+    expect(schedule.status).toBe(201);
+
+    const generation = await request(app)
+      .post("/api/v1/schedules/generate-sessions")
+      .set("Authorization", "Bearer owner-token")
+      .send({ from: "2026-10-20", to: "2026-10-27" });
+    expect(generation.status).toBe(200);
+    expect(generation.body.data.createdCount).toBe(3);
+    const repeated = await request(app)
+      .post("/api/v1/schedules/generate-sessions")
+      .set("Authorization", "Bearer owner-token")
+      .send({ from: "2026-10-20", to: "2026-10-27" });
+    expect(repeated.body.data.createdCount).toBe(0);
+
+    const sessions = await request(app)
+      .get("/api/v1/sessions?from=2026-10-20T00:00:00.000Z&to=2026-10-28T00:00:00.000Z")
+      .set("Authorization", "Bearer owner-token");
+    expect(sessions.status).toBe(200);
+    const created = sessions.body.data.sessions as Array<{
+      id: string;
+      startsAt: string;
+      endsAt: string;
+      status: string;
+    }>;
+    expect(created).toHaveLength(3);
+    expect(created[0]?.startsAt).toBe("2026-10-20T03:30:00.000Z");
+
+    const attendanceQueue = await request(app)
+      .get("/api/v1/attendance/sessions?from=2026-10-20T00:00:00.000Z&to=2026-10-28T00:00:00.000Z")
+      .set("Authorization", "Bearer owner-token");
+    expect(attendanceQueue.status).toBe(200);
+    expect(attendanceQueue.body.data.sessions).toHaveLength(3);
+    expect(attendanceQueue.body.data.sessions[0]).toMatchObject({
+      expectedCount: 2,
+      markedCount: 0,
+    });
+
+    const moved = await request(app)
+      .patch(`/api/v1/sessions/${created[0]?.id}`)
+      .set("Authorization", "Bearer owner-token")
+      .send({ startsAt: "2026-10-20T04:30:00.000Z", endsAt: "2026-10-20T05:30:00.000Z" });
+    expect(moved.status).toBe(200);
+    expect(moved.body.data.startsAt).toBe("2026-10-20T04:30:00.000Z");
+
+    const cancelled = await request(app)
+      .post(`/api/v1/sessions/${created[1]?.id}/cancel`)
+      .set("Authorization", "Bearer owner-token");
+    expect(cancelled.status).toBe(200);
+    expect(cancelled.body.data.status).toBe("cancelled");
+    expect(
+      (
+        await request(app)
+          .patch(`/api/v1/sessions/${created[1]?.id}`)
+          .set("Authorization", "Bearer owner-token")
+          .send({ startsAt: "2026-10-27T04:30:00.000Z", endsAt: "2026-10-27T05:30:00.000Z" })
+      ).status,
+    ).toBe(409);
+
+    const edited = await request(app)
+      .patch(`/api/v1/schedules/${schedule.body.data.id}`)
+      .set("Authorization", "Bearer owner-token")
+      .send({ dayOfWeek: 4, startTime: "08:00", endTime: "09:00", venue: "Studio C" });
+    expect(edited.status).toBe(200);
+    expect(edited.body.data.venue).toBe("Studio C");
+    const deactivated = await request(app)
+      .patch(`/api/v1/schedules/${schedule.body.data.id}`)
+      .set("Authorization", "Bearer owner-token")
+      .send({ isActive: false });
+    expect(deactivated.body.data.isActive).toBe(false);
+    const suppressed = await request(app)
+      .post("/api/v1/schedules/generate-sessions")
+      .set("Authorization", "Bearer owner-token")
+      .send({ from: "2026-10-29", to: "2026-11-05" });
+    expect(suppressed.body.data.createdCount).toBe(1);
   });
 });

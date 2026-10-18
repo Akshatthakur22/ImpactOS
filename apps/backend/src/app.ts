@@ -6,6 +6,7 @@ import { rateLimit } from "express-rate-limit";
 import helmet from "helmet";
 import { ZodError } from "zod";
 import { AuthError, type SportDeskAuthService } from "./modules/auth/auth.service.js";
+import { requirePermission } from "./modules/auth/authorization.js";
 import { createAuthRouter } from "./modules/auth/auth.routes.js";
 import { createAcademyRouter } from "./modules/academy/academy.routes.js";
 import { AcademyError, type SportDeskAcademyService } from "./modules/academy/academy.service.js";
@@ -24,6 +25,20 @@ import {
   AnnouncementError,
   type SportDeskAnnouncementsService,
 } from "./modules/announcements/announcements.service.js";
+import { createAdmissionsRouter } from "./modules/admissions/admissions.routes.js";
+import {
+  AdmissionsError,
+  type SportDeskAdmissionsService,
+} from "./modules/admissions/admissions.service.js";
+import { createUsersRouter } from "./modules/users/users.routes.js";
+import { UsersError, type SportDeskUsersService } from "./modules/users/users.service.js";
+import { createPushRouter } from "./modules/push/push.routes.js";
+import type { SportDeskPushService } from "./modules/push/push.service.js";
+import { createProgressRouter } from "./modules/progress/progress.routes.js";
+import {
+  ProgressError,
+  type SportDeskProgressService,
+} from "./modules/progress/progress.service.js";
 
 export type AppOptions = {
   auth: SportDeskAuthService;
@@ -33,6 +48,10 @@ export type AppOptions = {
   dashboard?: SportDeskDashboardService;
   finance?: SportDeskFinanceService;
   announcements?: SportDeskAnnouncementsService;
+  admissions?: SportDeskAdmissionsService;
+  users?: SportDeskUsersService;
+  push?: SportDeskPushService;
+  progress?: SportDeskProgressService;
   webOrigin: string;
   secureCookies: boolean;
   sessionTtlDays: number;
@@ -82,6 +101,19 @@ export function createApp(options: AppOptions): Express {
   });
 
   app.use("/api/v1/auth/login", loginLimiter);
+  const passwordResetLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 5,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    message: {
+      error: {
+        code: "RATE_LIMITED",
+        message: "Too many password reset attempts. Try again later.",
+      },
+    },
+  });
+  app.use("/api/v1/auth/password-reset", passwordResetLimiter);
   app.use(
     "/api/v1/auth",
     createAuthRouter({
@@ -93,13 +125,7 @@ export function createApp(options: AppOptions): Express {
   );
 
   app.get("/api/v1/admin/overview", async (request, response) => {
-    const token = request.get("authorization")?.match(/^Bearer ([A-Za-z0-9._~-]+)$/)?.[1];
-    if (!token) throw new AuthError(401, "UNAUTHENTICATED", "Authentication is required.");
-    const user = await options.auth.authenticate(token);
-    if (!user) throw new AuthError(401, "UNAUTHENTICATED", "Authentication is required.");
-    if (user.role !== "owner") {
-      throw new AuthError(403, "FORBIDDEN", "Owner access is required for this view.");
-    }
+    const user = await requirePermission(request, options.auth, "admin:dashboard:read");
     if (!options.dashboard) throw new Error("Admin dashboard service is not configured.");
     const overview = await options.dashboard.getOverview(user.academyId);
     response.status(200).json({ data: { ...overview, user } });
@@ -111,7 +137,11 @@ export function createApp(options: AppOptions): Express {
   if (options.operations) {
     app.use(
       "/api/v1",
-      createOperationsRouter({ auth: options.auth, operations: options.operations }),
+      createOperationsRouter({
+        auth: options.auth,
+        operations: options.operations,
+        ...(options.push ? { push: options.push } : {}),
+      }),
     );
   }
   if (options.parents) {
@@ -125,6 +155,21 @@ export function createApp(options: AppOptions): Express {
       "/api/v1",
       createAnnouncementsRouter({ auth: options.auth, announcements: options.announcements }),
     );
+  }
+  if (options.admissions) {
+    app.use(
+      "/api/v1",
+      createAdmissionsRouter({ auth: options.auth, admissions: options.admissions }),
+    );
+  }
+  if (options.users) {
+    app.use("/api/v1", createUsersRouter({ auth: options.auth, users: options.users }));
+  }
+  if (options.push) {
+    app.use("/api/v1", createPushRouter({ auth: options.auth, push: options.push }));
+  }
+  if (options.progress) {
+    app.use("/api/v1", createProgressRouter({ auth: options.auth, progress: options.progress }));
   }
 
   app.use((_request, response) => {
@@ -185,14 +230,43 @@ export function createApp(options: AppOptions): Express {
       });
       return;
     }
+    if (error instanceof AdmissionsError) {
+      response.status(error.status).json({
+        error: { code: error.code, message: error.message, requestId },
+      });
+      return;
+    }
+    if (error instanceof UsersError) {
+      response.status(error.status).json({
+        error: { code: error.code, message: error.message, requestId },
+      });
+      return;
+    }
+    if (error instanceof ProgressError) {
+      response
+        .status(error.status)
+        .json({ error: { code: error.code, message: error.message, requestId } });
+      return;
+    }
     if (error instanceof SyntaxError && "body" in error) {
       response.status(400).json({
         error: { code: "INVALID_JSON", message: "Request body is not valid JSON.", requestId },
       });
       return;
     }
-    // Do not return or log request values, tokens, or internal exception messages.
-    console.error(JSON.stringify({ event: "request_failed", requestId }));
+    // Preserve the response's generic error while recording safe diagnostic metadata.
+    const errorName = error instanceof Error ? error.name : "UnknownError";
+    const errorCode =
+      typeof error === "object" && error !== null && "code" in error &&
+      typeof error.code === "string"
+        ? error.code
+        : undefined;
+    console.error(JSON.stringify({
+      event: "request_failed",
+      requestId,
+      errorName,
+      ...(errorCode ? { errorCode } : {}),
+    }));
     response.status(500).json({
       error: { code: "INTERNAL_ERROR", message: "An unexpected error occurred.", requestId },
     });

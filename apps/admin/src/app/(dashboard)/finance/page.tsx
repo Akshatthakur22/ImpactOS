@@ -1,1 +1,5 @@
-export { default } from "@/features/finance/page";
+import FinancePage from "@/features/finance/page";
+
+export default function FinanceRoute() {
+  return <FinancePage />;
+}

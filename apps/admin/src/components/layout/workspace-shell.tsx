@@ -5,40 +5,87 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
+import type { Permission } from "@sportdesk/contracts";
 
-const navigation = [
-  { href: "/dashboard", label: "Dashboard", group: "Workspace", matches: ["/dashboard"] },
-  { href: "/students", label: "Students", group: "People", matches: ["/students"] },
-  { href: "/coaches", label: "Coaches & classes", group: "People", matches: ["/coaches"] },
+const navigation: Array<{
+  href: string;
+  label: string;
+  group: string;
+  matches: string[];
+  permission?: Permission;
+  ownerOnly?: boolean;
+}> = [
+  {
+    href: "/dashboard",
+    label: "Dashboard",
+    group: "Workspace",
+    matches: ["/dashboard"],
+    permission: "admin:dashboard:read",
+  },
+  {
+    href: "/admissions",
+    label: "Admissions",
+    group: "People",
+    matches: ["/admissions"],
+    permission: "admissions:manage",
+  },
+  {
+    href: "/students",
+    label: "Students",
+    group: "People",
+    matches: ["/students"],
+    permission: "students:read",
+  },
+  {
+    href: "/coaches",
+    label: "Coaches & classes",
+    group: "People",
+    matches: ["/coaches"],
+    permission: "coaches:read",
+  },
   {
     href: "/operations",
     label: "Academy operations",
     group: "Operations",
     matches: ["/operations"],
+    permission: "schedules:read",
   },
   {
     href: "/finance",
     label: "Finance",
     group: "Finance & insight",
     matches: ["/finance", "/fees", "/expenses"],
+    permission: "payments:read",
   },
   {
     href: "/analytics",
     label: "Analytics",
     group: "Finance & insight",
     matches: ["/analytics"],
+    permission: "admin:dashboard:read",
   },
   {
     href: "/notices",
     label: "Notices",
     group: "Communication",
     matches: ["/notices"],
+    permission: "announcements:manage",
   },
-  { href: "/settings", label: "Settings", group: "Administration", matches: ["/settings"] },
+  {
+    href: "/settings",
+    label: "Settings",
+    group: "Administration",
+    matches: ["/settings"],
+    permission: "settings:manage",
+  },
+  {
+    href: "/staff",
+    label: "Staff access",
+    group: "Administration",
+    matches: ["/staff"],
+    ownerOnly: true,
+  },
 ];
-
-const primaryMobileNavigation = navigation.slice(0, 5);
-const secondaryMobileNavigation = navigation.slice(5);
 
 function isNavigationActive(pathname: string, matches: string[]) {
   return matches.some((match) => pathname === match || pathname.startsWith(`${match}/`));
@@ -48,6 +95,13 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const { user, loading, sessionRestoreError, refreshSession, logout } = useAuth();
+  const visibleNavigation = navigation.filter(
+    (item) =>
+      user?.role === "owner" ||
+      (!item.ownerOnly && item.permission && user?.permissions?.includes(item.permission)),
+  );
+  const primaryMobileNavigation = visibleNavigation.slice(0, 5);
+  const secondaryMobileNavigation = visibleNavigation.slice(5);
 
   useEffect(() => {
     if (!loading && !user && !sessionRestoreError) router.replace("/login");
@@ -61,10 +115,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
             <p className="text-sm font-semibold text-accent">Impact Academy</p>
             <h1 className="mt-3 text-xl font-semibold">Could not restore your session</h1>
             <p className="mt-2 leading-6">{sessionRestoreError}</p>
-            <Button
-              className="mt-6"
-              onClick={() => void refreshSession().catch(() => undefined)}
-            >
+            <Button className="mt-6" onClick={() => void refreshSession().catch(() => undefined)}>
               Try again
             </Button>
             <Button className="mt-3" variant="outline" onClick={() => router.replace("/login")}>
@@ -78,14 +129,14 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
     );
   }
 
-  if (user.role !== "owner") {
+  if (user.role !== "owner" && user.role !== "staff") {
     return (
       <main className="grid min-h-screen place-items-center px-6">
         <div className="max-w-md rounded-2xl border border-line bg-white p-8 text-center shadow-sm">
           <p className="text-sm font-semibold text-accent">Impact Academy</p>
           <h1 className="mt-3 text-xl font-semibold">Admin access is not enabled</h1>
           <p className="mt-2 text-sm leading-6 text-muted">
-            Your account is signed in, but academy record management currently requires an owner.
+            Your account does not have access to the admin workspace.
           </p>
           <Button
             className="mt-6"
@@ -112,29 +163,31 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
           </span>
         </Link>
         <nav className="mt-10 space-y-6" aria-label="Main navigation">
-          {[...new Set(navigation.map((item) => item.group))].map((group) => (
+          {[...new Set(visibleNavigation.map((item) => item.group))].map((group) => (
             <div key={group}>
               <div className="px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#98a3aa]">
                 {group}
               </div>
               <div className="mt-2 space-y-1">
-                {navigation.filter((item) => item.group === group).map((item) => {
-                  const active = isNavigationActive(pathname, item.matches);
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      aria-current={active ? "page" : undefined}
-                      className={`block rounded-xl px-3 py-2.5 text-sm font-medium ${
-                        active
-                          ? "bg-accent-soft font-semibold text-accent"
-                          : "text-muted hover:bg-[#f5f7f7]"
-                      }`}
-                    >
-                      {item.label}
-                    </Link>
-                  );
-                })}
+                {visibleNavigation
+                  .filter((item) => item.group === group)
+                  .map((item) => {
+                    const active = isNavigationActive(pathname, item.matches);
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        aria-current={active ? "page" : undefined}
+                        className={`block rounded-xl px-3 py-2.5 text-sm font-medium ${
+                          active
+                            ? "bg-accent-soft font-semibold text-accent"
+                            : "text-muted hover:bg-[#f5f7f7]"
+                        }`}
+                      >
+                        {item.label}
+                      </Link>
+                    );
+                  })}
               </div>
             </div>
           ))}
@@ -158,7 +211,9 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
             </div>
             <div className="hidden text-sm text-muted lg:block">
               {user.academyName} <span className="px-2 text-[#bdc6cb]">/</span>
-              <span className="font-medium text-foreground">Owner workspace</span>
+              <span className="font-medium text-foreground">
+                {user.role === "owner" ? "Owner workspace" : "Staff workspace"}
+              </span>
             </div>
             <div className="flex items-center gap-3">
               <div className="hidden text-right sm:block">
@@ -177,7 +232,10 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
               </Button>
             </div>
           </div>
-          <nav className="flex items-center gap-1 overflow-x-auto pb-2 lg:hidden" aria-label="Main navigation">
+          <nav
+            className="flex items-center gap-1 overflow-x-auto pb-2 lg:hidden"
+            aria-label="Main navigation"
+          >
             {primaryMobileNavigation.map((item) => (
               <Link
                 key={item.href}
@@ -194,7 +252,9 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
             <details className="relative shrink-0">
               <summary
                 className={`cursor-pointer list-none rounded-lg px-2.5 py-2 text-xs font-medium ${
-                  secondaryMobileNavigation.some((item) => isNavigationActive(pathname, item.matches))
+                  secondaryMobileNavigation.some((item) =>
+                    isNavigationActive(pathname, item.matches),
+                  )
                     ? "bg-accent-soft text-accent"
                     : "text-muted hover:bg-[#f5f7f7]"
                 }`}

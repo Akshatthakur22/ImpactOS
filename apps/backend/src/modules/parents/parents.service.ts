@@ -168,6 +168,14 @@ export function createParentsService(repository: ParentRepository) {
         }),
       );
     },
+
+    async listStudentProgress(academyId: string, userId: string, studentId: string) {
+      try {
+        return await repository.listStudentProgress(academyId, userId, studentId);
+      } catch (error) {
+        translateError(error);
+      }
+    },
   };
 }
 

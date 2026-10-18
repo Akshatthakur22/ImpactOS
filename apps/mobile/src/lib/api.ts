@@ -13,10 +13,34 @@ const API_BASE = (process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:4000/api/
 const REFRESH_KEY = "sportdesk.refresh-token";
 let refreshInFlight: Promise<AuthData> | null = null;
 
+export async function mobileFetch(path: string, init: RequestInit = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12_000);
+  try {
+    return await fetch(`${API_BASE}${path}`, { ...init, signal: controller.signal });
+  } catch (caught) {
+    if (controller.signal.aborted) {
+      throw new Error(
+        "The academy server took too long to respond. Check that it is running and try again.",
+        { cause: caught },
+      );
+    }
+    if (caught instanceof TypeError) {
+      throw new Error(
+        "Could not reach the academy server. Check the mobile API address and Wi-Fi connection.",
+        { cause: caught },
+      );
+    }
+    throw caught;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function renewMobileSession(refreshToken: string) {
   if (!refreshInFlight) {
     refreshInFlight = (async () => {
-      const refreshed = await fetch(`${API_BASE}/auth/refresh`, {
+      const refreshed = await mobileFetch("/auth/refresh", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clientType: "mobile", refreshToken }),
@@ -50,7 +74,7 @@ export async function requestMobileData<T>(
   init: RequestInit = {},
 ): Promise<T> {
   const send = (accessToken: string) =>
-    fetch(`${API_BASE}${path}`, {
+    mobileFetch(path, {
       ...init,
       headers: {
         "Content-Type": "application/json",

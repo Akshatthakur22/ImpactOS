@@ -51,39 +51,39 @@ This is the app organization, not a claim that every blueprint module is complet
 
 ## Audit: current admin baseline
 
-| Area                       | Present in this repo                                                                                                                                              | Main gap                                                                                                                                        |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sign-in and shell          | Owner login, session refresh/logout, owner-only admin routes, responsive navigation                                                                               | Staff accounts and a full user lifecycle are not enabled                                                                                         |
-| Dashboard                  | Live enrollment/coach/program/batch totals, academy-local sessions and attendance, recent attendance, quick actions                                               | No finance or inquiry metrics, trend reports, or configurable widgets; deeper admin workflows remain incomplete                                 |
-| Students and guardians     | Registration; paged search and status filters; edit student/guardian contact; enrollment end/re-enrollment; invite state, issue/reissue and revoke                | Shared guardian/child linking, emergency details/documents, student-status audit history, bulk workflows, and broader admission pipeline remain |
-| Programs and batches       | Create/list and edit/activate/archive disciplines, programs and batches; active roster counts and capacity validation                                             | Batch coach detail/assignment context, schedule linkage, and batch-specific operational review remain                                           |
-| Coaches                    | Create coach account/profile; edit name/contact/specializations; activate/deactivate; assign to batches                                                           | No unassign flow, coach detail/history, or compensation workflow                                                                                |
-| Schedule and sessions      | Add recurring batch schedule and create a dated session                                                                                                           | No calendar, schedule edit/deactivation, session reschedule/cancel, or recurring session generation                                             |
-| Attendance                 | Review records by date, correct with a reason, inspect correction history                                                                                         | No session-first workflow, summaries/exports or clear unmarked-session queue                                                                    |
-| Finance                    | Manual student invoices; partial cash/UPI/bank receipts; discounts/waivers with reasons; refund reversals; parent read-only statement; expenses and period export | No Razorpay checkout/webhooks yet; coach compensation deliberately deferred                                                                     |
-| Admissions                 | Student records can be created directly                                                                                                                           | No inquiry/admissions pipeline or lead source exists in the current schema                                                                      |
-| Progress and communication | No assessment, announcement or notification module                                                                                                                | Define visibility and consent rules before adding these records                                                                                 |
-| Performance and reports    | Attendance consistency view; CSV attendance, student directory, finance summary, and expense exports                                                              | No discipline-specific assessments, saved report builder, inquiry analytics, or configurable scheduled exports                                 |
-| Notifications and settings | Parent in-app announcements with drafts/publish/archive/read tracking; academy name and timezone editor; currency shown read-only                                     | No email/SMS/push delivery, notification preferences, staff permissions, or editable currency                                                     |
+| Area                       | Present in this repo                                                                                                                                                | Main gap                                                                                                                                        |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sign-in and shell          | Owner/staff login, session refresh/logout, API-enforced staff permission grants, responsive permission-filtered navigation, token-based password reset              | Password reset email requires Resend configuration; additional lifecycle audit coverage remains                                                 |
+| Dashboard                  | Live enrollment/coach/program/batch totals, academy-local sessions and attendance, recent attendance, quick actions                                                 | No finance or inquiry metrics, trend reports, or configurable widgets; deeper admin workflows remain incomplete                                 |
+| Students and guardians     | Registration; paged search and status filters; edit student/guardian contact; enrollment end/re-enrollment; invite state, issue/reissue and revoke                  | Shared guardian/child linking, emergency details/documents, student-status audit history, bulk workflows, and broader admission pipeline remain |
+| Programs and batches       | Create/list and edit/activate/archive disciplines, programs and batches; active roster counts and capacity validation                                               | Batch coach detail/assignment context, schedule linkage, and batch-specific operational review remain                                           |
+| Coaches                    | Create coach account/profile; edit name/contact/specializations; activate/deactivate; assign to batches                                                             | No unassign flow, coach detail/history, or compensation workflow                                                                                |
+| Schedule and sessions      | Edit/deactivate recurring schedules; generate academy-timezone sessions idempotently; safely reschedule/cancel unmarked sessions                                    | Calendar and physical device timezone acceptance remain                                                                                         |
+| Attendance                 | Secure mobile offline retry queue; session-first summaries, batch/coach/status filters, corrections, history, and filtered CSV export                               | Push delivery requires EAS/APNs/FCM setup; physical offline acceptance remains                                                                  |
+| Finance                    | Manual student invoices; partial cash/UPI/bank receipts; discounts/waivers with reasons; refund reversals; parent read-only statement; expenses and period export   | No Razorpay checkout/webhooks yet; coach compensation deliberately deferred                                                                     |
+| Admissions                 | Inquiry queue with source/contact details, program interest, status, follow-up dates and activity history; atomic conversion into a student and optional enrollment | No bulk intake/import, lead-source analytics, or configurable source list                                                                       |
+| Progress and communication | Attendance consistency plus sport-labeled session assessments/notes; coaches control parent visibility; parent app shows shared notes; announcements with read tracking | Assessment templates, progress history corrections, push preferences, and broadcast external delivery remain                                    |
+| Performance and reports    | Attendance consistency and sport-labeled coach entries; CSV attendance, student directory, finance summary, and expense exports                                    | Assessment templates/trends, saved report builder, inquiry analytics, and configurable scheduled exports                                        |
+| Notifications and settings | Parent in-app announcements; owner/staff push alerts when a coach completes attendance; academy name/timezone; owner-managed staff permissions                      | Push alert preferences and broadcast delivery are not implemented; provider credentials required                                                |
 
 ### Blueprint coverage
 
 The blueprint lists 12 admin areas. The repository does **not** yet implement all of them end to end:
 
-| Blueprint module                     | Current state                                                                                                                                                                          |
-| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Authentication and user management   | Owner sign-in and session handling exist; staff access, reset flow, and full user lifecycle are missing.                                                                               |
-| Academy dashboard                    | Live operational first pass exists; finance, admissions, activity, and trend metrics await their source records.                                                                       |
-| Admissions and student management    | Registration and basic student/guardian/enrollment lifecycle exist; inquiry intake/conversion and complete record history remain.                                                      |
-| Sports, programs, batches, schedules | Create/list and basic scheduling exist; edit/archive, calendar, and occurrence generation remain.                                                                                      |
-| Coach management                     | Create, assign, edit, and activate/deactivate exist; unassign and broader profile/account workflows remain.                                                                            |
-| Attendance                           | Coach recording and owner correction exist; admin session queue, filters, reports, and export remain.                                                                                  |
-| Fees, invoices, payments             | Manual student charges, partial offline receipts, discount/waiver reasons, refund reversals, invoice void audit, and linked-child read-only access are implemented as the first slice. |
-| Expenses                             | Paid academy expense records, reasoned reversal, period totals, and CSV report are implemented as the first slice.                                                                     |
-| Athlete progress                     | Attendance-derived consistency view exists; sport-specific assessments, coach evaluations, and progress notes need a defined model.                                                    |
-| Notifications and announcements      | Owner-authored parent announcements are persisted, target all parents or a batch, publish to the parent app, and track reads; email/SMS/push is not connected.                         |
-| Reports and exports                  | Date-filtered attendance and finance summary CSV plus current student directory CSV use live API records; saved/custom report builder remains.                                           |
-| Academy settings                     | Owner can update academy name and IANA timezone; currency and slug are read-only; staff permissions remain unavailable.                                                                  |
+| Blueprint module                     | Current state                                                                                                                                                                                |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Authentication and user management   | Owner/staff sign-in, owner-managed staff grants, deactivation/session revocation, and one-use expiring password reset tokens exist; reset email delivery uses optional Resend configuration. |
+| Academy dashboard                    | Live operational first pass exists; finance and inquiry-pipeline metrics, activity feed, and trends are not displayed yet.                                                                   |
+| Admissions and student management    | Inquiry intake, source tracking, contact history, follow-up scheduling and conversion exist; full student/guardian/enrollment lifecycle remains partial.                                     |
+| Sports, programs, batches, schedules | Recurring schedule editing/deactivation, academy-timezone occurrence generation, and guarded reschedule/cancel exist; calendar view remains.                                                 |
+| Coach management                     | Create, assign, edit, and activate/deactivate exist; unassign and broader profile/account workflows remain.                                                                                  |
+| Attendance                           | Secure offline retry queue, session-first incomplete summaries, batch/coach/status filtering, audited correction, and filtered CSV export exist; native offline acceptance remains.          |
+| Fees, invoices, payments             | Manual student charges, partial offline receipts, discount/waiver reasons, refund reversals, invoice void audit, and linked-child read-only access are implemented as the first slice.       |
+| Expenses                             | Paid academy expense records, reasoned reversal, period totals, and CSV report are implemented as the first slice.                                                                           |
+| Athlete progress                     | Coaches can record sport-labeled session results/notes, owners can review, and parents only see entries explicitly shared for linked students; templates/trends/edit history remain.          |
+| Notifications and announcements      | Parent announcements remain in-app; Expo push registration and owner/staff attendance-completion alerts are wired, pending EAS and Apple/Google credential setup.                            |
+| Reports and exports                  | Date-filtered attendance and finance summary CSV plus current student directory CSV use live API records; saved/custom report builder remains.                                               |
+| Academy settings                     | Owner can update academy name and IANA timezone; currency and slug are read-only; owner can grant staff permissions.                                                                         |
 
 This is a truthful scope check against the attached SportDesk blueprint, not a claim of production readiness. “Implemented” below means the code path exists; device, browser, operational-policy, and production acceptance still need to be completed.
 
@@ -97,9 +97,9 @@ The older `Impact_ProSports` portal is a useful reference for the work an academ
 - Student, coach, attendance, inquiry, finance, analytics and settings areas.
 - Search/filter workflows, status views, action queues and period-based analytics.
 - Clear summaries that help an owner decide what to work on next.
-- Admissions intake and conversion, used as a reference for a future inquiry lifecycle.
+- Admissions intake and conversion, used as a design input for the current inquiry workflow.
 
-Use those journeys and information hierarchy as product evidence. Do not copy its route tree, PWA assumptions, legacy API, database, payment provider setup, or metrics. SportDesk revenue and expenses must come from the new ledger; legacy inquiries, coach payouts, and profit remain reference-only until their rules and records exist here.
+Use those journeys and information hierarchy as product evidence. Do not copy its route tree, PWA assumptions, legacy API, database, payment provider setup, or metrics. SportDesk revenue and expenses come from the new ledger; the legacy inquiry schema is not reused, and coach payouts/profit remain reference-only until their rules and records exist here.
 
 ## Admin build order and acceptance
 
@@ -113,7 +113,7 @@ Use those journeys and information hierarchy as product evidence. Do not copy it
 
 **Built:** academy-scoped paged search/status filters; student detail editor; guardian contact editor; enrollment history with end and new enrollment actions; invite state, one-time issue/reissue, and revocation. Suspending, completing, or withdrawing a student closes active enrollments transactionally.
 
-**Remaining:** shared guardian linking across siblings, admissions inquiry conversion, emergency-contact policy, audit history for student profile/status changes, and acceptance against a running API/device.
+**Remaining:** shared guardian linking across siblings, emergency-contact policy, audit history for student profile/status changes, and acceptance against a running API/device.
 
 **Acceptance:** Updates preserve enrollment and guardian history; parent identity never grants access to an unlinked student; invites are one-use and never expose stored tokens after creation.
 
@@ -129,19 +129,19 @@ Use those journeys and information hierarchy as product evidence. Do not copy it
 
 **Built:** coach list, contact/specialization editing, active/inactive lifecycle, assigned batch view, and session revocation when a coach is deactivated.
 
-**Remaining:** unassigning a coach, useful coach detail/history, and the account-recovery workflow. Coach compensation is deferred until the owner defines it.
+**Remaining:** unassigning a coach and useful coach detail/history. Account recovery is implemented with configured Resend delivery. Coach compensation is deferred until the owner defines it.
 
 **Acceptance:** Deactivation prevents new coach actions without erasing historical session/attendance attribution; access changes revoke existing sessions.
 
 ### 5. Schedule and session operations
 
-**Build:** daily/weekly calendar, schedule editing/deactivation, session creation from schedules, safe reschedule/cancel flow, and repeatable generation of session occurrences.
+**Built:** recurring schedule editing/deactivation, session creation, safe reschedule/cancel for sessions without marks, and idempotent academy-timezone occurrence generation. A calendar view remains open.
 
 **Acceptance:** Sessions are stored as UTC instants and shown in the academy timezone; cancelled sessions are not treated as absences; duplicate generation is prevented.
 
 ### 6. Attendance oversight
 
-**Build:** session-centric review, unmarked/incomplete queue, date/batch/coach filters, status summaries, audited correction history, and a useful export.
+**Built:** session-centric review, unmarked/incomplete queue, date/batch/coach/status filters, summaries, audited correction history, filtered CSV export, and secure mobile offline retry. Push alert delivery needs EAS/APNs/FCM credentials and device acceptance.
 
 **Acceptance:** Corrections always retain prior/new status, reason, actor and timestamp; only authorized sessions can be changed; cancelled sessions are excluded from attendance rates.
 
@@ -157,15 +157,17 @@ Use those journeys and information hierarchy as product evidence. Do not copy it
 
 ### 8. Admissions, progress and communication
 
-- **Admissions next:** add an inquiry queue with source, contact details, status, notes, next follow-up, and a transactional conversion into a student plus optional enrollment. Keep replies as saved drafts until a real message provider and consent flow exist; do not claim a draft was sent.
-- **Progress:** define discipline-specific assessments, who can see each note, and how amendments are retained before a parent view is exposed.
+- **Admissions built:** an owner-only inquiry queue captures student/contact details, source and program interest; search/status/follow-up filters; contact activity history; next-follow-up scheduling; and a transactional conversion into a student, guardian link, and optional batch enrollment. Conversion respects academy scope, active catalog records, and batch capacity. Bulk intake/import, configurable source choices, lead-source analytics, and real message delivery remain open.
+- **Progress built first:** coaches record sport-labeled results and notes per session, choose parent visibility, owners review all entries, and parents see only shared entries for linked children. Define assessment templates, amendments and trend history next.
 - **Communication:** in-app notices now support academy-wide, parent, and coach audiences, including batch targeting for parents or assigned coaches. Add external delivery only after consent, delivery preferences, retries, and provider delivery history are designed.
 
 ### 9. Reports, settings and staff permissions
 
 **Built first:** attendance and finance summary CSV exports, a privacy-aware student directory export, academy name/timezone settings, and parent announcements. Currency remains read-only to protect existing ledger records.
 
-**Next:** inquiry pipeline and conversion; filterable/saved attendance and enrollment reports; sport-specific assessments and progress history; staff accounts with API-enforced permissions; and provider-backed notification delivery.
+**Staff lifecycle built:** owners can create staff accounts, edit permission grants, and deactivate/reactivate access. The API checks grants for administrative operations and deactivation revokes active sessions. Password reset uses hashed single-use tokens, a 30-minute expiry, rate-limited endpoints, and revokes active sessions after a successful reset. Set `RESEND_API_KEY` and `EMAIL_FROM` to deliver reset emails.
+
+**Next:** inquiry-source reporting; filterable/saved attendance and enrollment reports; assessment templates and trend history; and provider-backed announcement delivery.
 
 **Acceptance:** exports use the same scope and filters as the visible report; settings validate IANA timezone; staff permissions are checked by the API and verified for record-level boundaries; parents only receive academy-wide or batch-specific announcements they are entitled to see.
 

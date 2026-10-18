@@ -3,25 +3,33 @@ import {
   AcademyBranchSchema,
   ApiErrorSchema,
   AdminAttendanceEntrySchema,
+  ProgressEntrySchema,
+  AttendanceSessionSummarySchema,
   AttendanceCorrectionEntrySchema,
   CoachSchema,
   CorrectAttendanceRequestSchema,
   GuardianInviteSchema,
   RevokedInviteSchema,
   ScheduleSchema,
+  GenerateSessionsRequestSchema,
+  RescheduleSessionRequestSchema,
   TrainingSessionSchema,
   UpdatedRecordSchema,
   UpdateCoachRequestSchema,
+  UpdateScheduleRequestSchema,
   type CreateCoachRequest,
   type CreateAcademyBranchRequest,
   type CreateScheduleRequest,
   type CreateSessionRequest,
+  type GenerateSessionsRequest,
+  type RescheduleSessionRequest,
   type CorrectAttendanceRequest,
   type Coach,
   type AcademyBranch,
   type Schedule,
   type UpdateCoachRequest,
   type UpdateAcademyBranchRequest,
+  type UpdateScheduleRequest,
 } from "@sportdesk/contracts";
 import { API_BASE, ApiRequestError } from "@/lib/auth-api";
 
@@ -188,6 +196,37 @@ export async function createSchedule(
   );
 }
 
+export async function updateSchedule(
+  token: string,
+  refresh: RefreshSession,
+  scheduleId: string,
+  input: UpdateScheduleRequest,
+) {
+  const parsed = UpdateScheduleRequestSchema.parse(input);
+  return requestData(
+    `/schedules/${scheduleId}`,
+    (value: unknown) => ScheduleSchema.parse(value),
+    token,
+    refresh,
+    { method: "PATCH", body: JSON.stringify(parsed) },
+  );
+}
+
+export async function generateSessions(
+  token: string,
+  refresh: RefreshSession,
+  input: GenerateSessionsRequest,
+) {
+  const parsed = GenerateSessionsRequestSchema.parse(input);
+  return requestData(
+    "/schedules/generate-sessions",
+    (value: unknown) => value as { createdCount: number },
+    token,
+    refresh,
+    body(parsed),
+  );
+}
+
 export async function createSession(
   token: string,
   refresh: RefreshSession,
@@ -203,18 +242,96 @@ export async function createSession(
   );
 }
 
+export async function getSessions(token: string, refresh: RefreshSession, from: Date, to: Date) {
+  const params = new URLSearchParams({ from: from.toISOString(), to: to.toISOString() });
+  return requestData(
+    `/sessions?${params}`,
+    (value: unknown) => ({
+      sessions: (value as { sessions: unknown[] }).sessions.map((session) =>
+        TrainingSessionSchema.parse(session),
+      ),
+    }),
+    token,
+    refresh,
+  );
+}
+
+export async function rescheduleSession(
+  token: string,
+  refresh: RefreshSession,
+  sessionId: string,
+  input: RescheduleSessionRequest,
+) {
+  const parsed = RescheduleSessionRequestSchema.parse(input);
+  return requestData(
+    `/sessions/${sessionId}`,
+    (value: unknown) => TrainingSessionSchema.parse(value),
+    token,
+    refresh,
+    { method: "PATCH", body: JSON.stringify(parsed) },
+  );
+}
+
+export async function cancelSession(token: string, refresh: RefreshSession, sessionId: string) {
+  return requestData(
+    `/sessions/${sessionId}/cancel`,
+    (value: unknown) => TrainingSessionSchema.parse(value),
+    token,
+    refresh,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
 export async function getAttendance(
   token: string,
   refresh: RefreshSession,
   from: string,
   to: string,
+  filters: { batchId?: string; recordedBy?: string } = {},
 ) {
-  const query = new URLSearchParams({ from, to });
+  const query = new URLSearchParams({ from, to, ...filters });
   return requestData<{ records: ReturnType<typeof AdminAttendanceEntrySchema.parse>[] }>(
     `/attendance?${query.toString()}`,
     (value: unknown) => ({
       records: (value as { records: unknown[] }).records.map((record) =>
         AdminAttendanceEntrySchema.parse(record),
+      ),
+    }),
+    token,
+    refresh,
+  );
+}
+
+export async function getAttendanceSessions(
+  token: string,
+  refresh: RefreshSession,
+  from: Date,
+  to: Date,
+  batchId?: string,
+) {
+  const query = new URLSearchParams({
+    from: from.toISOString(),
+    to: to.toISOString(),
+    ...(batchId ? { batchId } : {}),
+  });
+  return requestData(
+    `/attendance/sessions?${query}`,
+    (value: unknown) => ({
+      sessions: (value as { sessions: unknown[] }).sessions.map((item) =>
+        AttendanceSessionSummarySchema.parse(item),
+      ),
+    }),
+    token,
+    refresh,
+  );
+}
+
+export async function getProgressEntries(token: string, refresh: RefreshSession) {
+  return requestData(
+    "/progress",
+    (value: unknown) => ({
+      entries: (value as { entries: unknown[] }).entries.map((item) =>
+        ProgressEntrySchema.parse(item),
       ),
     }),
     token,

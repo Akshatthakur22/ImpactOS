@@ -42,7 +42,28 @@ export const feeChargeStatus = pgEnum("fee_charge_status", ["issued", "voided"])
 export const feePaymentMethod = pgEnum("fee_payment_method", ["cash", "upi", "bank_transfer"]);
 export const expenseStatus = pgEnum("expense_status", ["recorded", "voided"]);
 export const announcementStatus = pgEnum("announcement_status", ["draft", "published", "archived"]);
-export const announcementAudience = pgEnum("announcement_audience", ["everyone", "parents", "coaches"]);
+export const announcementAudience = pgEnum("announcement_audience", [
+  "everyone",
+  "parents",
+  "coaches",
+]);
+export const inquiryStatus = pgEnum("inquiry_status", [
+  "new",
+  "contacted",
+  "follow_up",
+  "trial_scheduled",
+  "converted",
+  "lost",
+]);
+export const inquiryActivityType = pgEnum("inquiry_activity_type", [
+  "note",
+  "call",
+  "message",
+  "visit",
+  "trial",
+  "status_change",
+  "conversion",
+]);
 
 export const academies = pgTable(
   "academies",
@@ -96,10 +117,7 @@ export const academyBranches = pgTable(
   },
   (table) => [
     uniqueIndex("academy_branches_id_academy_uq").on(table.id, table.academyId),
-    uniqueIndex("academy_branches_academy_name_uq").on(
-      table.academyId,
-      sql`lower(${table.name})`,
-    ),
+    uniqueIndex("academy_branches_academy_name_uq").on(table.academyId, sql`lower(${table.name})`),
     index("academy_branches_academy_active_idx").on(table.academyId, table.isActive),
     check("academy_branches_name_nonempty_chk", sql`length(btrim(${table.name})) > 0`),
     foreignKey({
@@ -135,6 +153,9 @@ export const userPermissions = pgTable(
   "user_permissions",
   {
     id: uuid("id").defaultRandom().primaryKey(),
+    academyId: uuid("academy_id")
+      .notNull()
+      .references(() => academies.id, { onDelete: "restrict" }),
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -144,7 +165,65 @@ export const userPermissions = pgTable(
   },
   (table) => [
     uniqueIndex("user_permissions_user_permission_uq").on(table.userId, table.permission),
-    index("user_permissions_user_idx").on(table.userId),
+    index("user_permissions_user_idx").on(table.academyId, table.userId),
+    foreignKey({
+      name: "user_permissions_user_academy_fk",
+      columns: [table.userId, table.academyId],
+      foreignColumns: [users.id, users.academyId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "user_permissions_granted_by_academy_fk",
+      columns: [table.grantedBy, table.academyId],
+      foreignColumns: [users.id, users.academyId],
+    }).onDelete("restrict"),
+  ],
+);
+
+export const passwordResetTokens = pgTable(
+  "password_reset_tokens",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    academyId: uuid("academy_id")
+      .notNull()
+      .references(() => academies.id, { onDelete: "restrict" }),
+    userId: uuid("user_id").notNull(),
+    tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true, mode: "date" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("password_reset_tokens_hash_uq").on(table.tokenHash),
+    index("password_reset_tokens_user_expiry_idx").on(table.academyId, table.userId, table.expiresAt),
+    foreignKey({
+      name: "password_reset_tokens_user_academy_fk",
+      columns: [table.userId, table.academyId],
+      foreignColumns: [users.id, users.academyId],
+    }).onDelete("cascade"),
+  ],
+);
+
+export const pushDevices = pgTable(
+  "push_devices",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    academyId: uuid("academy_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    expoPushToken: varchar("expo_push_token", { length: 255 }).notNull(),
+    platform: varchar("platform", { length: 8 }).notNull(),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("push_devices_token_uq").on(table.expoPushToken),
+    index("push_devices_academy_user_idx").on(table.academyId, table.userId),
+    foreignKey({
+      name: "push_devices_user_academy_fk",
+      columns: [table.userId, table.academyId],
+      foreignColumns: [users.id, users.academyId],
+    }).onDelete("cascade"),
+    check("push_devices_platform_chk", sql`${table.platform} IN ('ios', 'android')`),
   ],
 );
 
@@ -277,6 +356,98 @@ export const students = pgTable(
     ),
     foreignKey({
       name: "students_created_by_academy_fk",
+      columns: [table.createdBy, table.academyId],
+      foreignColumns: [users.id, users.academyId],
+    }).onDelete("restrict"),
+  ],
+);
+
+export const inquiries = pgTable(
+  "inquiries",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    academyId: uuid("academy_id")
+      .notNull()
+      .references(() => academies.id, { onDelete: "restrict" }),
+    studentFirstName: varchar("student_first_name", { length: 80 }).notNull(),
+    studentLastName: varchar("student_last_name", { length: 80 }).notNull(),
+    contactName: varchar("contact_name", { length: 120 }).notNull(),
+    contactEmail: varchar("contact_email", { length: 254 }),
+    contactPhone: varchar("contact_phone", { length: 30 }),
+    relationship: varchar("relationship", { length: 40 }).notNull().default("Parent"),
+    source: varchar("source", { length: 120 }).notNull(),
+    sourceDetail: varchar("source_detail", { length: 240 }),
+    programId: uuid("program_id"),
+    status: inquiryStatus("status").notNull().default("new"),
+    notes: text("notes"),
+    nextFollowUpAt: timestamp("next_follow_up_at", { withTimezone: true, mode: "date" }),
+    convertedStudentId: uuid("converted_student_id"),
+    createdBy: uuid("created_by").notNull(),
+    updatedBy: uuid("updated_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("inquiries_id_academy_uq").on(table.id, table.academyId),
+    uniqueIndex("inquiries_converted_student_uq").on(table.convertedStudentId),
+    index("inquiries_academy_status_created_idx").on(
+      table.academyId,
+      table.status,
+      table.createdAt,
+    ),
+    index("inquiries_academy_follow_up_idx").on(table.academyId, table.nextFollowUpAt),
+    foreignKey({
+      name: "inquiries_program_academy_fk",
+      columns: [table.programId, table.academyId],
+      foreignColumns: [programs.id, programs.academyId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "inquiries_converted_student_academy_fk",
+      columns: [table.convertedStudentId, table.academyId],
+      foreignColumns: [students.id, students.academyId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "inquiries_created_by_academy_fk",
+      columns: [table.createdBy, table.academyId],
+      foreignColumns: [users.id, users.academyId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "inquiries_updated_by_academy_fk",
+      columns: [table.updatedBy, table.academyId],
+      foreignColumns: [users.id, users.academyId],
+    }).onDelete("restrict"),
+  ],
+);
+
+export const inquiryActivities = pgTable(
+  "inquiry_activities",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    academyId: uuid("academy_id")
+      .notNull()
+      .references(() => academies.id, { onDelete: "restrict" }),
+    inquiryId: uuid("inquiry_id").notNull(),
+    type: inquiryActivityType("type").notNull(),
+    note: text("note").notNull(),
+    statusBefore: inquiryStatus("status_before"),
+    statusAfter: inquiryStatus("status_after"),
+    nextFollowUpAt: timestamp("next_follow_up_at", { withTimezone: true, mode: "date" }),
+    createdBy: uuid("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("inquiry_activities_academy_inquiry_created_idx").on(
+      table.academyId,
+      table.inquiryId,
+      table.createdAt,
+    ),
+    foreignKey({
+      name: "inquiry_activities_inquiry_academy_fk",
+      columns: [table.inquiryId, table.academyId],
+      foreignColumns: [inquiries.id, inquiries.academyId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "inquiry_activities_created_by_academy_fk",
       columns: [table.createdBy, table.academyId],
       foreignColumns: [users.id, users.academyId],
     }).onDelete("restrict"),
@@ -856,6 +1027,30 @@ export const attendanceRecords = pgTable(
       columns: [table.recordedBy, table.academyId],
       foreignColumns: [users.id, users.academyId],
     }).onDelete("restrict"),
+  ],
+);
+
+export const progressEntries = pgTable(
+  "progress_entries",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    academyId: uuid("academy_id").notNull(),
+    studentId: uuid("student_id").notNull(),
+    sessionId: uuid("session_id").notNull(),
+    coachId: uuid("coach_id").notNull(),
+    assessmentName: varchar("assessment_name", { length: 100 }).notNull(),
+    value: varchar("value", { length: 120 }),
+    coachNote: varchar("coach_note", { length: 1000 }),
+    parentVisible: boolean("parent_visible").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("progress_entries_student_created_idx").on(table.academyId, table.studentId, table.createdAt),
+    index("progress_entries_session_idx").on(table.academyId, table.sessionId),
+    foreignKey({ name: "progress_entries_student_academy_fk", columns: [table.studentId, table.academyId], foreignColumns: [students.id, students.academyId] }).onDelete("restrict"),
+    foreignKey({ name: "progress_entries_session_academy_fk", columns: [table.sessionId, table.academyId], foreignColumns: [trainingSessions.id, trainingSessions.academyId] }).onDelete("restrict"),
+    foreignKey({ name: "progress_entries_coach_academy_fk", columns: [table.coachId, table.academyId], foreignColumns: [users.id, users.academyId] }).onDelete("restrict"),
   ],
 );
 

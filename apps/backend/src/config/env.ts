@@ -13,6 +13,8 @@ const EnvironmentSchema = z.object({
   TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(0),
   SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(30),
   ACCESS_TOKEN_TTL_MINUTES: z.coerce.number().int().min(5).max(60).default(15),
+  RESEND_API_KEY: z.string().min(1).optional(),
+  EMAIL_FROM: z.string().email().optional(),
 });
 
 export type AppEnv = z.infer<typeof EnvironmentSchema>;

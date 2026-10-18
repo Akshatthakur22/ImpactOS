@@ -1,6 +1,6 @@
 # SportDesk
 
-SportDesk is a modular academy operations system being rebuilt for Impact Fit Academy. The project is delivered in small, verified slices. Phase 0 established identity and academy records; Phase 1's coach, schedule, attendance, and parent-access flows are implemented and are going through pilot acceptance checks before Phase 2 finance work begins.
+SportDesk is a modular academy operations system being built for Impact Fit Academy. The project is delivered in small slices. Identity and academy records are established, and initial admin, coach, parent, finance, reporting, and announcement workflows are implemented. The coach/parent operations flow and finance records still need acceptance on their intended clients and database before pilot use.
 
 ## Workspace
 
@@ -25,7 +25,7 @@ npm install --global pnpm@12.14.0
 
 ## Local setup
 
-1. Copy the root `.env.example` to `.env` and generate a random `JWT_ACCESS_SECRET` of at least 32 characters. The example database URL is for the local Compose database only. Copy `apps/admin/.env.example` to `apps/admin/.env.local` or `apps/mobile/.env.example` to `apps/mobile/.env` only when you need to override the API address.
+1. Copy the root `.env.example` to `.env` and generate a random `JWT_ACCESS_SECRET` of at least 32 characters. The example database URL is for the local Compose database only. Configure `RESEND_API_KEY` and `EMAIL_FROM` to enable password recovery mail. Copy `apps/admin/.env.example` to `apps/admin/.env.local` or `apps/mobile/.env.example` to `apps/mobile/.env` only when you need to override the API address.
 2. Start local PostgreSQL: `docker compose up -d postgres`.
 3. Install packages: `pnpm install`.
 4. Apply the checked-in migrations: `pnpm --filter @sportdesk/backend db:migrate`.
@@ -51,6 +51,6 @@ Backend integration tests apply the checked-in migrations to an isolated in-memo
 
 Phase 0 provides short-lived access tokens, rotating database-backed refresh sessions, strict environment parsing, owner-only admin access, and the first academy records workflow. Owners can configure disciplines, programs, and batches; register students; add a guardian contact; and assign a student to a batch. Student creation, guardian linking, and an initial enrollment are atomic. Academy scope comes from the authenticated user.
 
-Phase 1 includes coach accounts and batch assignments, recurring schedule records, date-specific sessions, coach mobile attendance entry, owner attendance review and audited corrections, expiring parent access invites, and parent mobile views limited to linked children. The feature code and backend integration tests are in place; physical-device workflow checks and broader browser E2E coverage remain before calling it pilot-ready. See [the product roadmap](docs/product-roadmap.md) for the closeout gates and Phase 2 plan.
+Phase 1 includes coach accounts and batch assignments, editable recurring schedules with idempotent session generation, session reschedule/cancel controls, coach mobile attendance with a secure offline retry queue, owner session-first attendance review and audited corrections, expiring parent access invites, and parent mobile views limited to linked children. Push attendance alerts are implemented for owner/staff mobile devices but require EAS/APNs/FCM configuration. Physical-device workflow checks and broader browser E2E coverage remain before calling it pilot-ready. See [the product roadmap](docs/product-roadmap.md) for acceptance gates and the next phase.
 
-The implementation intentionally keeps the product focused on one configured academy. Staff permission administration, automated session generation, fees, payments, athlete progress, announcements, reports, account recovery, and production deployment are not part of the current Phase 1 slice. The dashboard shows no fabricated operational metrics.
+The implementation intentionally keeps the product focused on one configured academy. The initial finance slice supports manual charges, offline receipts, refunds, expenses, and parent read-only statements; online payments are not connected. Admissions supports inquiry intake, follow-up history, source tracking, and conversion into a student with an optional enrollment. Staff accounts have owner-managed API permissions and token-based password recovery when Resend delivery is configured. Coaches can record sport-labeled progress entries and choose parent visibility; academy-defined assessment templates and history corrections remain open. The dashboard shows no fabricated operational metrics. See [the product roadmap](docs/product-roadmap.md) for current acceptance gates and gaps.

@@ -12,7 +12,7 @@ This roadmap uses `Impact_ProSports` as a reference for academy workflows that h
 
 ## How the older reference informs this build
 
-`Impact_ProSports` shows the workflows you validated: inquiry conversion, coach attendance, parent visibility, fees and receipts, progress notes, announcements, and operational reporting. The new repo carries attendance and parent schedule/history paths into separate admin, API, and mobile apps. The admin now has an initial attendance consistency view, reports from live records, in-app parent announcements, and academy profile/timezone settings. These first slices do not include athlete assessments, provider-backed messaging, saved reports, or inquiries yet.
+`Impact_ProSports` shows the workflows you validated: inquiry conversion, coach attendance, parent visibility, fees and receipts, progress notes, announcements, and operational reporting. The new repo carries these workflows into separate admin, API, and mobile apps. Inquiry intake and conversion, scheduling operations, attendance operations, and the first sport-labeled coach assessment/note flow are implemented. Provider-backed messaging, saved reports, and inquiry reporting remain future work.
 
 The reference is a broader Next.js PWA with marketing, staff, and finance areas. ImpactOS is intentionally a single-academy API-backed product. Reuse its user journeys and product learnings, not its route tree or database schema.
 
@@ -20,33 +20,34 @@ The reference is a broader Next.js PWA with marketing, staff, and finance areas.
 
 Continue module by module, with the admin portal as the current focus, then complete coach mobile workflows, then parent mobile workflows. A feature that crosses roles still starts with its shared API contract, persistence, and authorization rules before each client view is added. This gives each client a testable workflow while keeping one source of truth.
 
-The detailed admin inventory, reference mapping, build order, finance decisions, and acceptance criteria are in [admin-implementation-plan.md](./admin-implementation-plan.md). The live dashboard, core student/catalog/coach/finance workflows, and first performance/reporting/communication/settings slices are implemented in code. Inquiry management, sport assessments, broader reports, external message delivery, and staff permissions remain gaps. This module-first sequence supersedes treating phase labels as a gate for the next task; phase groupings remain useful for scope and dependencies.
+The detailed admin inventory, reference mapping, build order, finance decisions, and acceptance criteria are in [admin-implementation-plan.md](./admin-implementation-plan.md). The live dashboard, core student/catalog/coach/admissions/finance workflows, scheduling automation, attendance operations, and first coach progress slices are implemented in code. Staff permissions and token-based password recovery have an initial implementation; recovery delivery requires Resend configuration. Assessment templates, broader reports, and external announcement delivery remain gaps. This module-first sequence supersedes treating phase labels as a gate for the next task; phase groupings remain useful for scope and dependencies.
 
 ## Current state
 
-**Phase 0 is complete. Core Phase 1 paths exist in code, and coach/parent sign-in has been confirmed on device. Their complete session, attendance, invite, and linked-child flows still need acceptance. Admin work now proceeds module by module rather than waiting for a phase-wide closeout.**
+**Foundation and initial feature slices are implemented. Coach/parent sign-in has previously been confirmed on device, but the full session, attendance, invite, and linked-child flows still need device acceptance. The backend suite, workspace type checks, and lint pass as of 2026-10-18. Admin work proceeds module by module; this is not yet pilot approval.**
 
 ### Implemented
 
-| Area           | Current capability                                                                                                                                                                                                                    |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Identity       | Owner bootstrap, login, short-lived access tokens, rotating refresh sessions, logout, and current-user lookup.                                                                                                                        |
-| Academy setup  | Disciplines, programs, batches, students, guardian contacts, and enrollments. Student plus guardian plus initial enrollment creation is transactional.                                                                                |
+| Area           | Current capability                                                                                                                                                                                                                                                                                     |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Identity       | Owner bootstrap, login, short-lived access tokens, rotating refresh sessions, logout, and current-user lookup.                                                                                                                                                                                         |
+| Academy setup  | Disciplines, programs, batches, students, guardian contacts, and enrollments. Student plus guardian plus initial enrollment creation is transactional.                                                                                                                                                 |
+| Admissions     | Owner inquiry queue with lead source and program interest, searchable status/follow-up filters, activity history, due dates, and transactional student/guardian/optional-enrollment conversion.                                                                                                        |
 | Admin web      | Login, live academy dashboard, student/guardian lifecycle, catalog editing/capacity management, coach profile lifecycle, schedule/session creation, attendance review/correction, manual fees/expenses, attendance consistency, CSV reports, parent announcements, and academy name/timezone settings. |
-| Coach mobile   | Assigned upcoming sessions, batch roster, present/absent/late/excused marking, and session completion.                                                                                                                                |
-| Parent access  | One-use invite redemption, linked-child list, read-only schedule, attendance, finance records, and in-app academy/batch announcements with read tracking.                                                                               |
-| Backend safety | Shared Zod contracts, academy-scoped queries and foreign keys, Argon2id passwords, hashed refresh/invite tokens, and audited attendance corrections.                                                                                  |
-| Database       | Forward-only migrations include the finance ledger, expense register, announcements, and announcement read tracking. Migration `0007_admin_workspace_modules.sql` is applied to the local database. |
+| Coach mobile   | Mobile Today, Attendance, Classes, assigned Students, Profile, and notices navigation; assigned sessions; roster attendance; sport-labeled progress entries with parent visibility controls. Coach profile editing and payouts are not implemented.          |
+| Parent access  | One-use invite redemption, linked-child list, read-only schedule, attendance, finance records, and in-app academy/batch announcements with read tracking.                                                                                                                                              |
+| Backend safety | Shared Zod contracts, academy-scoped queries and foreign keys, Argon2id passwords, hashed refresh/invite tokens, and audited attendance corrections.                                                                                                                                                   |
+| Database       | Forward-only migrations include the finance ledger, expense register, announcements/read tracking, and admissions inquiry/activity tables. Migration `0010_married_skin.sql` adds the admissions records.                                                                                              |
 
 ### Verification snapshot
 
-- Focused TypeScript checks pass for shared contracts, backend, admin, and mobile after the finance slice.
-- ESLint passes for the finance, parent mobile, and touched backend files.
-- No automated tests were run for the finance slice; database-backed finance and parent-scope acceptance remains outstanding.
-- Backend suite passes: 7 files, 16 tests, including academy, operations, parent-access, and migration flows.
+- Workspace TypeScript checks pass for shared contracts, backend, admin, and mobile (2026-10-18).
+- Repository ESLint passes (2026-10-18).
+- Backend integration suite passes: 8 files, 17 tests, including admissions intake, follow-up history, conversion, capacity rollback, academy, operations, parent-access, and migrations (2026-10-18).
+- Finance has no dedicated automated integration tests yet; finance-ledger and parent-finance isolation acceptance remains outstanding.
 - The one Playwright test covers an owner creating a student and parent invite through mocked API responses. It does not exercise a real backend or the coach/parent mobile journeys.
-- Playwright did not complete in this audit: the running admin dev server holds the shared `.next/dev` lock, and a localhost proxy workaround hit Next's dev-origin restriction. Rerun with the admin dev server stopped or configure an isolated Next build directory for E2E. The test's coverage should also be expanded before the pilot.
-- The API and local database were smoke-checked, but the corrected mobile LAN address still needs confirmation on the physical phone.
+- Playwright and production build were not run in this verification pass. The prior audit recorded a shared `.next/dev` lock and a Next dev-origin restriction during E2E; rerun with a clean test environment and expand coverage before the pilot.
+- The API/local database and physical-device LAN address were not re-smoke-checked in this pass. Confirm the configured mobile API address and complete the coach and parent workflows on academy devices.
 
 ## Phase 1 — Academy operations closeout
 
@@ -67,15 +68,14 @@ Owner creates a coach and assigns a batch
 3. Correct one attendance record as owner and verify its history contains the old value, new value, reason, actor, and time.
 4. Redeem a parent invite, confirm the linked child's schedule and attendance, and confirm an unrelated child cannot be read.
 5. Rerun the browser E2E test in a clean test environment and add coverage for coach/parent-critical screens or record an equivalent repeatable device smoke procedure.
-6. Verify dates and times on academy devices. The academy timezone defaults to `Asia/Kolkata`; the current clients format timestamps using the device timezone, so that assumption should be tested and made explicit before users operate from other timezones.
+6. Verify dates and times and offline attendance recovery on academy devices. Scheduling and attendance use the configured academy timezone; device acceptance remains open.
 
 ### Known Phase 1 limits
 
-- Owners create each dated session manually; recurring schedules do not generate sessions automatically.
-- Coaches and schedules can be created and assigned, but the admin UI does not yet support the full edit/deactivate/unassign lifecycle.
+- Batch coach assignments still cannot be unassigned.
 - Parent invite codes are shown once for manual delivery; the app does not send email or SMS.
-- Attendance has no offline queue or push notifications.
-- Staff accounts remain denied; the existing permission table is not yet an active staff-permission system.
+- Attendance now has a secure local retry queue, session-first review, filters, summaries, and CSV export. Push attendance alerts are wired for owner/staff devices; EAS project and Apple/Google credentials are required for delivery.
+- Staff permissions are API-enforced and owner-managed; email recovery requires Resend configuration. Additional staff lifecycle audit coverage remains.
 - The current E2E check is a mocked admin journey, not a real-backend or native-app test.
 
 Do not add these deferred features just to declare Phase 1 complete. The closeout is about proving the implemented workflow works on the intended clients.
@@ -92,7 +92,7 @@ Do not add these deferred features just to declare Phase 1 complete. The closeou
 
 ### Phase 3 — Athlete progress
 
-Coach assessments and notes using academy-defined measures; parent read-only progress history. The current performance page summarizes attendance only. Define who can see each note and how corrections are retained before exposing coach notes to families.
+**First slice built:** coaches can add sport-labeled assessment results or notes to a session and explicitly choose parent visibility; owners review entries in Analytics and parents see only shared entries for linked children. Coaches use free-form assessment names and values. Academy-defined measurement templates, trend charts, edit/correction history, and offline note capture remain.
 
 ### Phase 4 — Announcements and reminders
 
@@ -100,10 +100,10 @@ Parent in-app academy/batch announcements are available as an initial slice. Att
 
 ### Phase 5 — Reports and administration
 
-Saved reports, inquiry reporting, configurable exports, fuller academy settings, and staff permissions remain. Attendance, student directory, finance summary, and expense exports have first slices. Defer coach payouts until the academy defines the compensation rules.
+Saved reports, inquiry reporting, configurable exports, academy-defined assessment templates, and fuller academy settings remain. Attendance, student directory, finance summary, and expense exports have first slices. Defer coach payouts until the academy defines the compensation rules.
 
 ### Phase 6 — Production readiness
 
-Account recovery, explicit staff permissions, sanitized server diagnostics, monitoring, backups and restore drills, retention/export/deletion workflows, security review, production bootstrap, and deployment runbooks. These controls are prerequisites for real production data, not a substitute for product acceptance.
+Configured account recovery and staff permissions now have initial implementation; sanitized server diagnostics, monitoring, backups and restore drills, retention/export/deletion workflows, security review, production bootstrap, and deployment runbooks remain. These controls are prerequisites for real production data, not a substitute for product acceptance.
 
 Keep the focused product shape. Defer multi-academy SaaS, marketplace, payroll, microservices, Kubernetes, and AI until actual academy operations demonstrate a need.

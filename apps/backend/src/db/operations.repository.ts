@@ -3,9 +3,12 @@ import type {
   CreateAcademyBranchRequest,
   UpdateAcademyBranchRequest,
   UpdateCoachRequest,
+  UpdateScheduleRequest,
 } from "@sportdesk/contracts";
 import type { Database } from "./client.js";
+import { academyLocalDateTimeToUtc } from "../modules/operations/academy-time.js";
 import {
+  academies,
   academyBranches,
   attendanceCorrections,
   attendanceRecords,
@@ -28,7 +31,8 @@ export class OperationsRepositoryError extends Error {
       | "COACH_NOT_ASSIGNED"
       | "SESSION_CLOSED"
       | "ATTENDANCE_INCOMPLETE"
-      | "INVALID_ATTENDANCE",
+      | "INVALID_ATTENDANCE"
+      | "SESSION_NOT_RESCHEDULABLE",
   ) {
     super(code);
     this.name = "OperationsRepositoryError";
@@ -310,11 +314,78 @@ export function createOperationsRepository(db: Database) {
         .orderBy(asc(batchSchedules.dayOfWeek), asc(batchSchedules.startTime));
     },
 
-    async listAttendance(academyId: string, from: Date, to: Date) {
+    async updateSchedule(input: {
+      academyId: string;
+      scheduleId: string;
+      changes: UpdateScheduleRequest;
+    }) {
+      const [current] = await db
+        .select({ batchId: batchSchedules.batchId, branchId: batchSchedules.branchId })
+        .from(batchSchedules)
+        .where(
+          and(
+            eq(batchSchedules.id, input.scheduleId),
+            eq(batchSchedules.academyId, input.academyId),
+          ),
+        )
+        .limit(1);
+      if (!current) throw new OperationsRepositoryError("RELATED_RECORD_NOT_FOUND");
+      if (input.changes.isActive !== false) {
+        const nextBatchId = input.changes.batchId ?? current.batchId;
+        const [batch] = await db
+          .select({ id: batches.id })
+          .from(batches)
+          .where(
+            and(
+              eq(batches.id, nextBatchId),
+              eq(batches.academyId, input.academyId),
+              eq(batches.isActive, true),
+            ),
+          )
+          .limit(1);
+        if (!batch) throw new OperationsRepositoryError("RELATED_RECORD_NOT_FOUND");
+        const nextBranchId =
+          input.changes.branchId === undefined ? current.branchId : input.changes.branchId;
+        if (nextBranchId) {
+          const [branch] = await db
+            .select({ id: academyBranches.id })
+            .from(academyBranches)
+            .where(
+              and(
+                eq(academyBranches.id, nextBranchId),
+                eq(academyBranches.academyId, input.academyId),
+                eq(academyBranches.isActive, true),
+              ),
+            )
+            .limit(1);
+          if (!branch) throw new OperationsRepositoryError("RELATED_RECORD_NOT_FOUND");
+        }
+      }
+      const [schedule] = await db
+        .update(batchSchedules)
+        .set({ ...input.changes, updatedAt: new Date() })
+        .where(
+          and(
+            eq(batchSchedules.id, input.scheduleId),
+            eq(batchSchedules.academyId, input.academyId),
+          ),
+        )
+        .returning({ id: batchSchedules.id });
+      if (!schedule) throw new OperationsRepositoryError("RELATED_RECORD_NOT_FOUND");
+      return (await this.listSchedules(input.academyId)).find(
+        (item) => item.id === input.scheduleId,
+      )!;
+    },
+
+    async listAttendance(academyId: string, from: Date, to: Date, filters: { batchId?: string; recordedBy?: string } = {}) {
+      const conditions = [eq(attendanceRecords.academyId, academyId), gte(trainingSessions.startsAt, from), lte(trainingSessions.startsAt, to)];
+      if (filters.batchId) conditions.push(eq(batches.id, filters.batchId));
+      if (filters.recordedBy) conditions.push(eq(users.id, filters.recordedBy));
       const records = await db
         .select({
           id: attendanceRecords.id,
           sessionId: trainingSessions.id,
+          batchId: batches.id,
           studentId: students.id,
           studentName: sql<string>`concat(${students.firstName}, ' ', ${students.lastName})`,
           batchName: batches.name,
@@ -330,11 +401,7 @@ export function createOperationsRepository(db: Database) {
         .innerJoin(batches, eq(trainingSessions.batchId, batches.id))
         .innerJoin(users, eq(attendanceRecords.recordedBy, users.id))
         .where(
-          and(
-            eq(attendanceRecords.academyId, academyId),
-            gte(trainingSessions.startsAt, from),
-            lte(trainingSessions.startsAt, to),
-          ),
+          and(...conditions),
         )
         .orderBy(desc(trainingSessions.startsAt), asc(students.lastName), asc(students.firstName));
       if (records.length === 0) return [];
@@ -358,6 +425,30 @@ export function createOperationsRepository(db: Database) {
         ...record,
         correctionCount: countByAttendanceId.get(record.id) ?? 0,
       }));
+    },
+
+    async listAttendanceSessions(academyId: string, from: Date, to: Date, batchId?: string) {
+      const conditions = [eq(trainingSessions.academyId, academyId), gte(trainingSessions.startsAt, from), lte(trainingSessions.startsAt, to), sql`${trainingSessions.status} <> 'cancelled'`];
+      if (batchId) conditions.push(eq(batches.id, batchId));
+      return db.select({
+        id: trainingSessions.id,
+        batchId: batches.id,
+        batchName: batches.name,
+        branchName: academyBranches.name,
+        startsAt: trainingSessions.startsAt,
+        endsAt: trainingSessions.endsAt,
+        status: trainingSessions.status,
+        expectedCount: sql<number>`count(distinct ${enrollments.studentId})::int`,
+        markedCount: sql<number>`count(distinct ${attendanceRecords.studentId})::int`,
+      }).from(trainingSessions)
+        .innerJoin(batches, eq(trainingSessions.batchId, batches.id))
+        .leftJoin(batchSchedules, eq(trainingSessions.scheduleId, batchSchedules.id))
+        .leftJoin(academyBranches, and(eq(batchSchedules.branchId, academyBranches.id), eq(batchSchedules.academyId, academyBranches.academyId)))
+        .leftJoin(enrollments, and(eq(enrollments.academyId, academyId), eq(enrollments.batchId, batches.id), eq(enrollments.status, "active")))
+        .leftJoin(attendanceRecords, and(eq(attendanceRecords.academyId, academyId), eq(attendanceRecords.sessionId, trainingSessions.id)))
+        .where(and(...conditions))
+        .groupBy(trainingSessions.id, batches.id, batches.name, academyBranches.name)
+        .orderBy(desc(trainingSessions.startsAt));
     },
 
     async listAttendanceCorrections(academyId: string, attendanceId: string) {
@@ -570,6 +661,206 @@ export function createOperationsRepository(db: Database) {
       return { ...session, batchName: batch?.name ?? "", branchName: schedule.branchName };
     },
 
+    async listSessions(academyId: string, from: Date, to: Date) {
+      return db
+        .select({
+          id: trainingSessions.id,
+          batchId: trainingSessions.batchId,
+          scheduleId: trainingSessions.scheduleId,
+          batchName: batches.name,
+          branchName: academyBranches.name,
+          startsAt: trainingSessions.startsAt,
+          endsAt: trainingSessions.endsAt,
+          venue: trainingSessions.venue,
+          status: trainingSessions.status,
+        })
+        .from(trainingSessions)
+        .innerJoin(batches, eq(trainingSessions.batchId, batches.id))
+        .leftJoin(batchSchedules, eq(trainingSessions.scheduleId, batchSchedules.id))
+        .leftJoin(
+          academyBranches,
+          and(
+            eq(batchSchedules.branchId, academyBranches.id),
+            eq(batchSchedules.academyId, academyBranches.academyId),
+          ),
+        )
+        .where(
+          and(
+            eq(trainingSessions.academyId, academyId),
+            gte(trainingSessions.startsAt, from),
+            lte(trainingSessions.startsAt, to),
+          ),
+        )
+        .orderBy(asc(trainingSessions.startsAt));
+    },
+
+    async updateSession(input: {
+      academyId: string;
+      sessionId: string;
+      startsAt?: Date;
+      endsAt?: Date;
+      cancel?: boolean;
+    }) {
+      return db.transaction(async (tx) => {
+        const [session] = await tx
+          .select({ id: trainingSessions.id, status: trainingSessions.status })
+          .from(trainingSessions)
+          .where(
+            and(
+              eq(trainingSessions.id, input.sessionId),
+              eq(trainingSessions.academyId, input.academyId),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!session) throw new OperationsRepositoryError("RELATED_RECORD_NOT_FOUND");
+        if (session.status !== "scheduled")
+          throw new OperationsRepositoryError("SESSION_NOT_RESCHEDULABLE");
+        const [attendance] = await tx
+          .select({ id: attendanceRecords.id })
+          .from(attendanceRecords)
+          .where(
+            and(
+              eq(attendanceRecords.sessionId, session.id),
+              eq(attendanceRecords.academyId, input.academyId),
+            ),
+          )
+          .limit(1);
+        if (attendance) throw new OperationsRepositoryError("SESSION_NOT_RESCHEDULABLE");
+        const [updated] = await tx
+          .update(trainingSessions)
+          .set({
+            ...(input.cancel
+              ? { status: "cancelled" as const }
+              : { startsAt: input.startsAt!, endsAt: input.endsAt! }),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(trainingSessions.id, session.id),
+              eq(trainingSessions.academyId, input.academyId),
+            ),
+          )
+          .returning({
+            id: trainingSessions.id,
+            batchId: trainingSessions.batchId,
+            scheduleId: trainingSessions.scheduleId,
+            startsAt: trainingSessions.startsAt,
+            endsAt: trainingSessions.endsAt,
+            venue: trainingSessions.venue,
+            status: trainingSessions.status,
+          });
+        if (!updated) throw new Error("Session update returned no record.");
+        const [batch] = await tx
+          .select({ name: batches.name })
+          .from(batches)
+          .where(eq(batches.id, updated.batchId))
+          .limit(1);
+        const [branch] = updated.scheduleId
+          ? await tx
+              .select({ name: academyBranches.name })
+              .from(batchSchedules)
+              .leftJoin(
+                academyBranches,
+                and(
+                  eq(batchSchedules.branchId, academyBranches.id),
+                  eq(batchSchedules.academyId, academyBranches.academyId),
+                ),
+              )
+              .where(eq(batchSchedules.id, updated.scheduleId))
+              .limit(1)
+          : [];
+        return { ...updated, batchName: batch?.name ?? "", branchName: branch?.name ?? null };
+      });
+    },
+
+    async generateSessions(input: {
+      academyId: string;
+      createdBy: string;
+      from: string;
+      to: string;
+    }) {
+      const [academy] = await db
+        .select({ timezone: academies.timezone })
+        .from(academies)
+        .where(eq(academies.id, input.academyId))
+        .limit(1);
+      if (!academy) throw new OperationsRepositoryError("RELATED_RECORD_NOT_FOUND");
+      const schedules = await db
+        .select({
+          id: batchSchedules.id,
+          batchId: batchSchedules.batchId,
+          dayOfWeek: batchSchedules.dayOfWeek,
+          startTime: batchSchedules.startTime,
+          endTime: batchSchedules.endTime,
+          venue: batchSchedules.venue,
+          branchId: batchSchedules.branchId,
+          branchIsActive: academyBranches.isActive,
+        })
+        .from(batchSchedules)
+        .innerJoin(
+          batches,
+          and(
+            eq(batchSchedules.batchId, batches.id),
+            eq(batchSchedules.academyId, batches.academyId),
+          ),
+        )
+        .leftJoin(
+          academyBranches,
+          and(
+            eq(batchSchedules.branchId, academyBranches.id),
+            eq(batchSchedules.academyId, academyBranches.academyId),
+          ),
+        )
+        .where(
+          and(
+            eq(batchSchedules.academyId, input.academyId),
+            eq(batchSchedules.isActive, true),
+            eq(batches.isActive, true),
+          ),
+        );
+      const candidates: Array<typeof trainingSessions.$inferInsert> = [];
+      const fromDay = new Date(`${input.from}T00:00:00.000Z`);
+      const toDay = new Date(`${input.to}T00:00:00.000Z`);
+      for (let day = fromDay; day <= toDay; day = new Date(day.getTime() + 86_400_000)) {
+        const date = day.toISOString().slice(0, 10);
+        for (const schedule of schedules) {
+          if (
+            schedule.dayOfWeek !== day.getUTCDay() ||
+            (schedule.branchId && !schedule.branchIsActive)
+          )
+            continue;
+          try {
+            candidates.push({
+              academyId: input.academyId,
+              batchId: schedule.batchId,
+              scheduleId: schedule.id,
+              startsAt: academyLocalDateTimeToUtc(date, schedule.startTime, academy.timezone),
+              endsAt: academyLocalDateTimeToUtc(date, schedule.endTime, academy.timezone),
+              venue: schedule.venue,
+              createdBy: input.createdBy,
+            });
+          } catch (error) {
+            if (!(error instanceof RangeError)) throw error;
+          }
+        }
+      }
+      if (!candidates.length) return { createdCount: 0 };
+      return db.transaction(async (tx) => {
+        let createdCount = 0;
+        for (let index = 0; index < candidates.length; index += 500) {
+          const chunk = candidates.slice(index, index + 500);
+          const inserted = await tx
+            .insert(trainingSessions)
+            .values(chunk)
+            .onConflictDoNothing()
+            .returning({ id: trainingSessions.id });
+          createdCount += inserted.length;
+        }
+        return { createdCount };
+      });
+    },
+
     async listCoachSessions(academyId: string, userId: string, from: Date, to: Date) {
       return db
         .select({
@@ -604,6 +895,59 @@ export function createOperationsRepository(db: Database) {
           ),
         )
         .orderBy(asc(trainingSessions.startsAt));
+    },
+
+    async listCoachStudents(academyId: string, userId: string) {
+      const rows = await db
+        .select({
+          studentId: students.id,
+          firstName: students.firstName,
+          lastName: students.lastName,
+          batchId: batches.id,
+          batchName: batches.name,
+        })
+        .from(coachProfiles)
+        .innerJoin(batchCoaches, eq(batchCoaches.coachId, coachProfiles.id))
+        .innerJoin(batches, eq(batchCoaches.batchId, batches.id))
+        .innerJoin(
+          enrollments,
+          and(eq(enrollments.batchId, batches.id), eq(enrollments.academyId, batches.academyId)),
+        )
+        .innerJoin(
+          students,
+          and(
+            eq(students.id, enrollments.studentId),
+            eq(students.academyId, enrollments.academyId),
+          ),
+        )
+        .where(
+          and(
+            eq(coachProfiles.academyId, academyId),
+            eq(coachProfiles.userId, userId),
+            eq(coachProfiles.status, "active"),
+            eq(batches.isActive, true),
+            eq(enrollments.status, "active"),
+            eq(students.status, "active"),
+          ),
+        )
+        .orderBy(asc(students.lastName), asc(students.firstName), asc(batches.name));
+
+      const result = new Map<
+        string,
+        { studentId: string; studentName: string; batches: { id: string; name: string }[] }
+      >();
+      for (const row of rows) {
+        const student = result.get(row.studentId) ?? {
+          studentId: row.studentId,
+          studentName: `${row.firstName} ${row.lastName}`,
+          batches: [],
+        };
+        if (!student.batches.some((batch) => batch.id === row.batchId)) {
+          student.batches.push({ id: row.batchId, name: row.batchName });
+        }
+        result.set(row.studentId, student);
+      }
+      return [...result.values()];
     },
 
     async getSessionRoster(academyId: string, sessionId: string, userId: string) {

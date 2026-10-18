@@ -6,28 +6,25 @@ import {
   CreateCoachRequestSchema,
   CreateScheduleRequestSchema,
   CreateSessionRequestSchema,
+  GenerateSessionsRequestSchema,
   CorrectAttendanceRequestSchema,
   RecordAttendanceRequestSchema,
   UpdateCoachRequestSchema,
   UpdateAcademyBranchRequestSchema,
+  UpdateScheduleRequestSchema,
+  RescheduleSessionRequestSchema,
 } from "@sportdesk/contracts";
 import type { SportDeskAuthService } from "../auth/auth.service.js";
 import { AuthError } from "../auth/auth.service.js";
+import { requirePermission } from "../auth/authorization.js";
 import { OperationsError, type SportDeskOperationsService } from "./operations.service.js";
+import type { SportDeskPushService } from "../push/push.service.js";
 
 async function authenticatedUser(request: Request, auth: SportDeskAuthService) {
   const token = request.get("authorization")?.match(/^Bearer ([A-Za-z0-9._~-]+)$/)?.[1];
   if (!token) throw new AuthError(401, "UNAUTHENTICATED", "Authentication is required.");
   const user = await auth.authenticate(token);
   if (!user) throw new AuthError(401, "UNAUTHENTICATED", "Authentication is required.");
-  return user;
-}
-
-async function ownerFromRequest(request: Request, auth: SportDeskAuthService) {
-  const user = await authenticatedUser(request, auth);
-  if (user.role !== "owner") {
-    throw new AuthError(403, "FORBIDDEN", "Owner access is required for this operation.");
-  }
   return user;
 }
 
@@ -62,19 +59,47 @@ function attendanceRange(request: Request) {
   return { from, to };
 }
 
+function attendanceSessionRange(request: Request) {
+  const now = new Date();
+  const from =
+    typeof request.query.from === "string"
+      ? new Date(request.query.from)
+      : new Date(now.getTime() - 7 * 86_400_000);
+  const to =
+    typeof request.query.to === "string"
+      ? new Date(request.query.to)
+      : new Date(now.getTime() + 60 * 86_400_000);
+  if (
+    Number.isNaN(from.getTime()) ||
+    Number.isNaN(to.getTime()) ||
+    from > to ||
+    to.getTime() - from.getTime() > 90 * 86_400_000
+  ) {
+    throw new OperationsError(
+      400,
+      "INVALID_DATE_RANGE",
+      "Use a valid session date range of no more than 90 days.",
+    );
+  }
+  return { from, to };
+}
+
 export function createOperationsRouter(options: {
   auth: SportDeskAuthService;
   operations: SportDeskOperationsService;
+  push?: SportDeskPushService;
 }): Router {
   const router = Router();
 
   router.get("/branches", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
-    response.status(200).json({ data: { branches: await options.operations.listBranches(user.academyId) } });
+    const user = await requirePermission(request, options.auth, "settings:manage");
+    response
+      .status(200)
+      .json({ data: { branches: await options.operations.listBranches(user.academyId) } });
   });
 
   router.post("/branches", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "settings:manage");
     const input = CreateAcademyBranchRequestSchema.parse(request.body);
     const branch = await options.operations.createBranch({
       ...input,
@@ -85,7 +110,7 @@ export function createOperationsRouter(options: {
   });
 
   router.patch("/branches/:branchId", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "settings:manage");
     const changes = UpdateAcademyBranchRequestSchema.parse(request.body);
     const branch = await options.operations.updateBranch({
       academyId: user.academyId,
@@ -96,14 +121,14 @@ export function createOperationsRouter(options: {
   });
 
   router.get("/coaches", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "coaches:read");
     response
       .status(200)
       .json({ data: { coaches: await options.operations.listCoaches(user.academyId) } });
   });
 
   router.post("/coaches", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "coaches:write");
     const input = CreateCoachRequestSchema.parse(request.body);
     const coach = await options.operations.createCoach({
       ...input,
@@ -114,7 +139,7 @@ export function createOperationsRouter(options: {
   });
 
   router.patch("/coaches/:coachId", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "coaches:write");
     const coachId = z.string().uuid().parse(request.params.coachId);
     const changes = UpdateCoachRequestSchema.parse(request.body);
     const result = await options.operations.updateCoach({
@@ -126,7 +151,7 @@ export function createOperationsRouter(options: {
   });
 
   router.post("/batches/:batchId/coaches", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "coaches:write");
     const input = AssignCoachRequestSchema.parse(request.body);
     const assignment = await options.operations.assignCoach({
       ...input,
@@ -138,21 +163,118 @@ export function createOperationsRouter(options: {
   });
 
   router.get("/schedules", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "schedules:read");
     response
       .status(200)
       .json({ data: { schedules: await options.operations.listSchedules(user.academyId) } });
   });
 
+  router.patch("/schedules/:scheduleId", async (request, response) => {
+    const user = await requirePermission(request, options.auth, "schedules:write");
+    const changes = UpdateScheduleRequestSchema.parse(request.body);
+    const schedule = await options.operations.updateSchedule({
+      academyId: user.academyId,
+      scheduleId: z.string().uuid().parse(request.params.scheduleId),
+      changes,
+    });
+    response.status(200).json({ data: schedule });
+  });
+
+  router.post("/schedules/generate-sessions", async (request, response) => {
+    const user = await requirePermission(request, options.auth, "schedules:write");
+    const input = GenerateSessionsRequestSchema.parse(request.body);
+    const result = await options.operations.generateSessions({
+      ...input,
+      academyId: user.academyId,
+      createdBy: user.id,
+    });
+    response.status(200).json({ data: result });
+  });
+
+  router.get("/sessions", async (request, response) => {
+    const user = await requirePermission(request, options.auth, "schedules:read");
+    const now = new Date();
+    const from =
+      typeof request.query.from === "string"
+        ? new Date(request.query.from)
+        : new Date(now.getTime() - 7 * 86_400_000);
+    const to =
+      typeof request.query.to === "string"
+        ? new Date(request.query.to)
+        : new Date(now.getTime() + 60 * 86_400_000);
+    if (
+      Number.isNaN(from.getTime()) ||
+      Number.isNaN(to.getTime()) ||
+      from > to ||
+      to.getTime() - from.getTime() > 90 * 86_400_000
+    ) {
+      throw new OperationsError(
+        400,
+        "INVALID_DATE_RANGE",
+        "Use a valid session date range of no more than 90 days.",
+      );
+    }
+    response.status(200).json({
+      data: { sessions: await options.operations.listSessions(user.academyId, from, to) },
+    });
+  });
+
+  router.patch("/sessions/:sessionId", async (request, response) => {
+    const user = await requirePermission(request, options.auth, "schedules:write");
+    const input = RescheduleSessionRequestSchema.parse(request.body);
+    const session = await options.operations.rescheduleSession({
+      ...input,
+      academyId: user.academyId,
+      sessionId: z.string().uuid().parse(request.params.sessionId),
+    });
+    response.status(200).json({ data: session });
+  });
+
+  router.post("/sessions/:sessionId/cancel", async (request, response) => {
+    const user = await requirePermission(request, options.auth, "schedules:write");
+    const session = await options.operations.cancelSession({
+      academyId: user.academyId,
+      sessionId: z.string().uuid().parse(request.params.sessionId),
+    });
+    response.status(200).json({ data: session });
+  });
+
   router.get("/attendance", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "attendance:read");
     const { from, to } = attendanceRange(request);
-    const records = await options.operations.listAttendance(user.academyId, from, to);
+    const batchId =
+      typeof request.query.batchId === "string"
+        ? z.string().uuid().parse(request.query.batchId)
+        : undefined;
+    const recordedBy =
+      typeof request.query.recordedBy === "string"
+        ? z.string().uuid().parse(request.query.recordedBy)
+        : undefined;
+    const records = await options.operations.listAttendance(user.academyId, from, to, {
+      ...(batchId ? { batchId } : {}),
+      ...(recordedBy ? { recordedBy } : {}),
+    });
     response.status(200).json({ data: { records } });
   });
 
+  router.get("/attendance/sessions", async (request, response) => {
+    const user = await requirePermission(request, options.auth, "attendance:read");
+    const { from, to } = attendanceSessionRange(request);
+    const batchId =
+      typeof request.query.batchId === "string"
+        ? z.string().uuid().parse(request.query.batchId)
+        : undefined;
+    const sessions = await options.operations.listAttendanceSessions(
+      user.academyId,
+      from,
+      to,
+      batchId,
+    );
+    response.status(200).json({ data: { sessions } });
+  });
+
   router.patch("/attendance/:attendanceId", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "attendance:correct");
     const input = CorrectAttendanceRequestSchema.parse(request.body);
     const correction = await options.operations.correctAttendance({
       ...input,
@@ -164,7 +286,7 @@ export function createOperationsRouter(options: {
   });
 
   router.get("/attendance/:attendanceId/corrections", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "attendance:read");
     const corrections = await options.operations.listAttendanceCorrections(
       user.academyId,
       z.string().uuid().parse(request.params.attendanceId),
@@ -173,7 +295,7 @@ export function createOperationsRouter(options: {
   });
 
   router.post("/schedules", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "schedules:write");
     const input = CreateScheduleRequestSchema.parse(request.body);
     const schedule = await options.operations.createSchedule({
       ...input,
@@ -184,7 +306,7 @@ export function createOperationsRouter(options: {
   });
 
   router.post("/schedules/:scheduleId/sessions", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "schedules:write");
     const input = CreateSessionRequestSchema.parse(request.body);
     const session = await options.operations.createSession({
       ...input,
@@ -202,6 +324,12 @@ export function createOperationsRouter(options: {
     const to = dateQuery(request.query.to, new Date(now.getTime() + 14 * 86_400_000));
     const sessions = await options.operations.listCoachSessions(user.academyId, user.id, from, to);
     response.status(200).json({ data: { sessions } });
+  });
+
+  router.get("/coach/me/students", async (request, response) => {
+    const user = await coachFromRequest(request, options.auth);
+    const students = await options.operations.listCoachStudents(user.academyId, user.id);
+    response.status(200).json({ data: { students } });
   });
 
   router.get("/coach/sessions/:sessionId/roster", async (request, response) => {
@@ -233,6 +361,17 @@ export function createOperationsRouter(options: {
       request.params.sessionId,
       user.id,
     );
+    if (!session) throw new OperationsError(404, "SESSION_NOT_FOUND", "The session was not found.");
+    if (options.push) {
+      try {
+        await options.push.attendanceRecorded(user.academyId, session.id);
+      } catch (error) {
+        console.warn(
+          "Attendance push alert could not be queued.",
+          error instanceof Error ? error.message : "unknown error",
+        );
+      }
+    }
     response.status(200).json({ data: session });
   });
 

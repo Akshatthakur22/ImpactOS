@@ -1,19 +1,10 @@
-import { Router, type Request } from "express";
-import {
-  CreateAnnouncementRequestSchema,
-} from "@sportdesk/contracts";
+import { Router } from "express";
+import { CreateAnnouncementRequestSchema } from "@sportdesk/contracts";
 import { z } from "zod";
 import type { SportDeskAuthService } from "../auth/auth.service.js";
+import { authenticatedUser, requirePermission } from "../auth/authorization.js";
 import { AuthError } from "../auth/auth.service.js";
 import type { SportDeskAnnouncementsService } from "./announcements.service.js";
-
-async function authenticatedUser(request: Request, auth: SportDeskAuthService) {
-  const token = request.get("authorization")?.match(/^Bearer ([A-Za-z0-9._~-]+)$/)?.[1];
-  if (!token) throw new AuthError(401, "UNAUTHENTICATED", "Authentication is required.");
-  const user = await auth.authenticate(token);
-  if (!user) throw new AuthError(401, "UNAUTHENTICATED", "Authentication is required.");
-  return user;
-}
 
 function requireRole(role: "owner" | "parent" | "coach", actualRole: string) {
   if (actualRole !== role) {
@@ -29,16 +20,14 @@ export function createAnnouncementsRouter(options: {
   const router = Router();
 
   router.get("/announcements", async (request, response) => {
-    const user = await authenticatedUser(request, options.auth);
-    requireRole("owner", user.role);
+    const user = await requirePermission(request, options.auth, "announcements:manage");
     response.status(200).json({
       data: await options.announcements.listForAdmin(user.academyId),
     });
   });
 
   router.post("/announcements", async (request, response) => {
-    const user = await authenticatedUser(request, options.auth);
-    requireRole("owner", user.role);
+    const user = await requirePermission(request, options.auth, "announcements:manage");
     const input = CreateAnnouncementRequestSchema.parse(request.body);
     const record = await options.announcements.createDraft({
       ...input,
@@ -49,8 +38,7 @@ export function createAnnouncementsRouter(options: {
   });
 
   router.patch("/announcements/:announcementId", async (request, response) => {
-    const user = await authenticatedUser(request, options.auth);
-    requireRole("owner", user.role);
+    const user = await requirePermission(request, options.auth, "announcements:manage");
     const input = CreateAnnouncementRequestSchema.parse(request.body);
     const result = await options.announcements.updateDraft({
       ...input,
@@ -61,8 +49,7 @@ export function createAnnouncementsRouter(options: {
   });
 
   router.post("/announcements/:announcementId/publish", async (request, response) => {
-    const user = await authenticatedUser(request, options.auth);
-    requireRole("owner", user.role);
+    const user = await requirePermission(request, options.auth, "announcements:manage");
     const result = await options.announcements.publish({
       academyId: user.academyId,
       announcementId: z.string().uuid().parse(request.params.announcementId),
@@ -71,8 +58,7 @@ export function createAnnouncementsRouter(options: {
   });
 
   router.post("/announcements/:announcementId/archive", async (request, response) => {
-    const user = await authenticatedUser(request, options.auth);
-    requireRole("owner", user.role);
+    const user = await requirePermission(request, options.auth, "announcements:manage");
     const result = await options.announcements.archive({
       academyId: user.academyId,
       announcementId: z.string().uuid().parse(request.params.announcementId),

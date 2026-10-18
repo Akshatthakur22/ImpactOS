@@ -1,6 +1,6 @@
 import { and, eq, gt, isNull } from "drizzle-orm";
 import type { Database } from "./client.js";
-import { academies, authSessions, users } from "./schema.js";
+import { academies, authSessions, userPermissions, users } from "./schema.js";
 
 export type UserWithAcademy = {
   id: string;
@@ -11,6 +11,8 @@ export type UserWithAcademy = {
   role: "owner" | "staff" | "coach" | "parent";
   isActive: boolean;
   academyName: string;
+  academyTimezone: string;
+  permissions: string[];
 };
 
 export interface AuthRepository {
@@ -46,12 +48,26 @@ export function createAuthRepository(db: Database): AuthRepository {
         role: users.role,
         isActive: users.isActive,
         academyName: academies.name,
+        academyTimezone: academies.timezone,
       })
       .from(users)
       .innerJoin(academies, eq(users.academyId, academies.id))
       .where(where)
       .limit(1);
-    return record ?? null;
+    if (!record) return null;
+    const permissions =
+      record.role === "staff"
+        ? await db
+            .select({ permission: userPermissions.permission })
+            .from(userPermissions)
+            .where(
+              and(
+                eq(userPermissions.academyId, record.academyId),
+                eq(userPermissions.userId, record.id),
+              ),
+            )
+        : [];
+    return { ...record, permissions: permissions.map((item) => item.permission) };
   }
 
   return {

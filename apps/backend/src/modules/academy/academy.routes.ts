@@ -1,4 +1,4 @@
-import { Router, type Request } from "express";
+import { Router } from "express";
 import { z } from "zod";
 import {
   CreateBatchRequestSchema,
@@ -16,19 +16,8 @@ import {
   UpdateStudentRequestSchema,
 } from "@sportdesk/contracts";
 import type { SportDeskAuthService } from "../auth/auth.service.js";
-import { AuthError } from "../auth/auth.service.js";
+import { requirePermission } from "../auth/authorization.js";
 import type { SportDeskAcademyService } from "./academy.service.js";
-
-async function ownerFromRequest(request: Request, auth: SportDeskAuthService) {
-  const token = request.get("authorization")?.match(/^Bearer ([A-Za-z0-9._~-]+)$/)?.[1];
-  if (!token) throw new AuthError(401, "UNAUTHENTICATED", "Authentication is required.");
-  const user = await auth.authenticate(token);
-  if (!user) throw new AuthError(401, "UNAUTHENTICATED", "Authentication is required.");
-  if (user.role !== "owner") {
-    throw new AuthError(403, "FORBIDDEN", "Owner access is required for academy records.");
-  }
-  return user;
-}
 
 export function createAcademyRouter(options: {
   auth: SportDeskAuthService;
@@ -37,12 +26,12 @@ export function createAcademyRouter(options: {
   const router = Router();
 
   router.get("/academy/settings", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "settings:manage");
     response.status(200).json({ data: await options.academy.getSettings(user.academyId) });
   });
 
   router.patch("/academy/settings", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "settings:manage");
     const changes = UpdateAcademySettingsRequestSchema.parse(request.body);
     response.status(200).json({
       data: await options.academy.updateSettings(user.academyId, changes),
@@ -50,12 +39,12 @@ export function createAcademyRouter(options: {
   });
 
   router.get("/academy/catalog", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "students:read");
     response.status(200).json({ data: await options.academy.getCatalog(user.academyId) });
   });
 
   router.post("/disciplines", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "academy:manage");
     const input = CreateDisciplineRequestSchema.parse(request.body);
     const record = await options.academy.createDiscipline({
       ...input,
@@ -66,7 +55,7 @@ export function createAcademyRouter(options: {
   });
 
   router.patch("/disciplines/:disciplineId", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "academy:manage");
     const disciplineId = z.string().uuid().parse(request.params.disciplineId);
     const changes = UpdateDisciplineRequestSchema.parse(request.body);
     const result = await options.academy.updateDiscipline({
@@ -78,7 +67,7 @@ export function createAcademyRouter(options: {
   });
 
   router.post("/programs", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "academy:manage");
     const input = CreateProgramRequestSchema.parse(request.body);
     const record = await options.academy.createProgram({
       ...input,
@@ -89,7 +78,7 @@ export function createAcademyRouter(options: {
   });
 
   router.patch("/programs/:programId", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "academy:manage");
     const programId = z.string().uuid().parse(request.params.programId);
     const changes = UpdateProgramRequestSchema.parse(request.body);
     const result = await options.academy.updateProgram({
@@ -101,7 +90,7 @@ export function createAcademyRouter(options: {
   });
 
   router.post("/batches", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "academy:manage");
     const input = CreateBatchRequestSchema.parse(request.body);
     const record = await options.academy.createBatch({
       ...input,
@@ -112,7 +101,7 @@ export function createAcademyRouter(options: {
   });
 
   router.patch("/batches/:batchId", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "academy:manage");
     const batchId = z.string().uuid().parse(request.params.batchId);
     const changes = UpdateBatchRequestSchema.parse(request.body);
     const result = await options.academy.updateBatch({
@@ -124,13 +113,13 @@ export function createAcademyRouter(options: {
   });
 
   router.get("/students", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "students:read");
     const query = StudentDirectoryQuerySchema.parse(request.query);
     response.status(200).json({ data: await options.academy.listStudents(user.academyId, query) });
   });
 
   router.post("/students", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "students:write");
     const input = CreateStudentRequestSchema.parse(request.body);
     const record = await options.academy.createStudent({
       ...input,
@@ -141,7 +130,7 @@ export function createAcademyRouter(options: {
   });
 
   router.post("/students/:studentId/enrollments", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "students:write");
     const input = CreateEnrollmentRequestSchema.parse(request.body);
     const studentId = z.string().uuid().parse(request.params.studentId);
     const record = await options.academy.createEnrollment({
@@ -154,7 +143,7 @@ export function createAcademyRouter(options: {
   });
 
   router.patch("/students/:studentId", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "students:write");
     const studentId = z.string().uuid().parse(request.params.studentId);
     const changes = UpdateStudentRequestSchema.parse(request.body);
     const result = await options.academy.updateStudent({
@@ -166,7 +155,7 @@ export function createAcademyRouter(options: {
   });
 
   router.patch("/students/:studentId/guardians/:guardianId", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "students:write");
     const studentId = z.string().uuid().parse(request.params.studentId);
     const guardianId = z.string().uuid().parse(request.params.guardianId);
     const changes = UpdateStudentGuardianRequestSchema.parse(request.body);
@@ -180,7 +169,7 @@ export function createAcademyRouter(options: {
   });
 
   router.patch("/students/:studentId/enrollments/:enrollmentId", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "students:write");
     const studentId = z.string().uuid().parse(request.params.studentId);
     const enrollmentId = z.string().uuid().parse(request.params.enrollmentId);
     const { status } = UpdateEnrollmentStatusRequestSchema.parse(request.body);

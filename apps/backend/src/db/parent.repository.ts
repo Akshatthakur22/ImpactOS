@@ -3,6 +3,9 @@ import type { Database } from "./client.js";
 import {
   academyBranches,
   attendanceRecords,
+  progressEntries,
+  programs,
+  disciplines,
   batchSchedules,
   batches,
   guardianInvites,
@@ -373,6 +376,42 @@ export function createParentRepository(db: Database) {
           ),
         )
         .orderBy(desc(trainingSessions.startsAt))
+        .limit(100);
+    },
+    async listStudentProgress(academyId: string, userId: string, studentId: string) {
+      return db
+        .select({
+          id: progressEntries.id,
+          studentId: progressEntries.studentId,
+          studentName: sql<string>`${students.firstName} || ' ' || ${students.lastName}`,
+          sessionId: progressEntries.sessionId,
+          batchName: batches.name,
+          sportName: disciplines.name,
+          assessmentName: progressEntries.assessmentName,
+          value: progressEntries.value,
+          coachNote: progressEntries.coachNote,
+          parentVisible: progressEntries.parentVisible,
+          coachName: users.displayName,
+          createdAt: progressEntries.createdAt,
+        })
+        .from(progressEntries)
+        .innerJoin(studentGuardians, eq(studentGuardians.studentId, progressEntries.studentId))
+        .innerJoin(guardians, eq(guardians.id, studentGuardians.guardianId))
+        .innerJoin(students, eq(students.id, progressEntries.studentId))
+        .innerJoin(trainingSessions, eq(trainingSessions.id, progressEntries.sessionId))
+        .innerJoin(batches, eq(batches.id, trainingSessions.batchId))
+        .innerJoin(programs, eq(programs.id, batches.programId))
+        .innerJoin(disciplines, eq(disciplines.id, programs.disciplineId))
+        .innerJoin(users, eq(users.id, progressEntries.coachId))
+        .where(
+          and(
+            eq(progressEntries.academyId, academyId),
+            eq(progressEntries.studentId, studentId),
+            eq(guardians.userId, userId),
+            eq(progressEntries.parentVisible, true),
+          ),
+        )
+        .orderBy(desc(progressEntries.createdAt))
         .limit(100);
     },
   };

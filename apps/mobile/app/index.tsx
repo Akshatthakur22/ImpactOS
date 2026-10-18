@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as SecureStore from "expo-secure-store";
+import { registerPushDevice, unregisterPushDevice } from "@/lib/push-notifications";
 import {
   ApiErrorSchema,
   ApiSuccessSchema,
@@ -22,12 +23,17 @@ import {
 } from "@sportdesk/contracts";
 import { CoachWorkspace } from "@/features/coach-workspace";
 import { ParentWorkspace } from "@/features/parent-workspace";
-
-const API_BASE = (process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:4000/api/v1").replace(
-  /\/$/,
-  "",
-);
+import { mobileFetch } from "@/lib/api";
 const REFRESH_KEY = "sportdesk.refresh-token";
+
+class MobileApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
 
 async function responseError(response: Response) {
   try {
@@ -40,22 +46,22 @@ async function responseError(response: Response) {
 }
 
 async function requestLogin(email: string, password: string): Promise<AuthData> {
-  const response = await fetch(`${API_BASE}/auth/login`, {
+  const response = await mobileFetch("/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password, clientType: "mobile" }),
   });
-  if (!response.ok) throw new Error(await responseError(response));
+  if (!response.ok) throw new MobileApiError(await responseError(response), response.status);
   return ApiSuccessSchema(AuthDataSchema).parse(await response.json()).data;
 }
 
 async function renewSession(refreshToken: string): Promise<AuthData> {
-  const response = await fetch(`${API_BASE}/auth/refresh`, {
+  const response = await mobileFetch("/auth/refresh", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ clientType: "mobile", refreshToken }),
   });
-  if (!response.ok) throw new Error(await responseError(response));
+  if (!response.ok) throw new MobileApiError(await responseError(response), response.status);
   return ApiSuccessSchema(AuthDataSchema).parse(await response.json()).data;
 }
 
@@ -73,6 +79,13 @@ export default function IndexScreen() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!auth) return;
+    void registerPushDevice(auth, setAuth).catch(() => {
+      // Push setup is optional; the authenticated workspace remains usable without it.
+    });
+  }, [auth?.accessToken]);
+
+  useEffect(() => {
     let active = true;
     async function restore() {
       try {
@@ -82,8 +95,12 @@ export default function IndexScreen() {
         if (nextAuth.refreshToken)
           await SecureStore.setItemAsync(REFRESH_KEY, nextAuth.refreshToken);
         if (active) setAuth(nextAuth);
-      } catch {
-        await SecureStore.deleteItemAsync(REFRESH_KEY);
+      } catch (caught) {
+        if (caught instanceof MobileApiError && [400, 401, 403].includes(caught.status)) {
+          await SecureStore.deleteItemAsync(REFRESH_KEY);
+        } else if (active) {
+          setError(caught instanceof Error ? caught.message : "Could not restore your session.");
+        }
       } finally {
         if (active) setLoading(false);
       }
@@ -120,12 +137,12 @@ export default function IndexScreen() {
         token: inviteToken.trim(),
         password: invitePassword,
       });
-      const response = await fetch(`${API_BASE}/parent-invites/redeem`, {
+      const response = await mobileFetch("/parent-invites/redeem", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input),
       });
-      if (!response.ok) throw new Error(await responseError(response));
+      if (!response.ok) throw new MobileApiError(await responseError(response), response.status);
       const result = ApiSuccessSchema(RedeemedGuardianInviteSchema).parse(
         await response.json(),
       ).data;
@@ -147,8 +164,9 @@ export default function IndexScreen() {
   async function handleLogout() {
     const token = auth?.refreshToken;
     try {
+      if (auth) await unregisterPushDevice(auth, setAuth);
       if (token) {
-        await fetch(`${API_BASE}/auth/logout`, {
+        await mobileFetch("/auth/logout", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ clientType: "mobile", refreshToken: token }),
@@ -361,7 +379,7 @@ export default function IndexScreen() {
             <Text style={styles.label}>Password</Text>
             <TextInput
               accessibilityLabel="Password"
-              autoComplete="password"
+              autoComplete="current-password"
               maxLength={256}
               onChangeText={setPassword}
               placeholder="Enter your password"

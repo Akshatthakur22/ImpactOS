@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { AdminAttendanceEntry } from "@sportdesk/contracts";
+import type { AdminAttendanceEntry, ProgressEntry } from "@sportdesk/contracts";
 import { calendarDateInTimezone, dateRangeInTimezone } from "@/lib/academy-time";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/hooks/use-auth";
-import { getAttendance } from "@/lib/operations-api";
+import { getAttendance, getProgressEntries } from "@/lib/operations-api";
 import { getAcademySettings } from "@/lib/settings-api";
 
 type StudentSummary = {
@@ -26,6 +26,7 @@ export default function PerformancePage() {
   const [to, setTo] = useState("");
   const [timezone, setTimezone] = useState("Asia/Kolkata");
   const [records, setRecords] = useState<AdminAttendanceEntry[]>([]);
+  const [progressEntries, setProgressEntries] = useState<ProgressEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,6 +53,13 @@ export default function PerformancePage() {
   }, [accessToken, refreshSession]);
 
   useEffect(() => {
+    if (!accessToken) return;
+    getProgressEntries(accessToken, refreshSession)
+      .then(({ entries }) => setProgressEntries(entries))
+      .catch(() => setProgressEntries([]));
+  }, [accessToken, refreshSession]);
+
+  useEffect(() => {
     if (!accessToken || !from || !to) return;
     if (from > to) {
       setError("Choose a valid date range.");
@@ -67,7 +75,8 @@ export default function PerformancePage() {
         if (active) setRecords(result.records);
       })
       .catch((caught: unknown) => {
-        if (active) setError(caught instanceof Error ? caught.message : "Could not load performance data.");
+        if (active)
+          setError(caught instanceof Error ? caught.message : "Could not load performance data.");
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -94,7 +103,8 @@ export default function PerformancePage() {
       student.sessions += 1;
       student[record.status] += 1;
       student.batches.add(record.batchName);
-      if (record.scheduledStart > student.lastTraining) student.lastTraining = record.scheduledStart;
+      if (record.scheduledStart > student.lastTraining)
+        student.lastTraining = record.scheduledStart;
       grouped.set(record.studentId, student);
     }
     return [...grouped.values()].sort((left, right) => {
@@ -102,12 +112,18 @@ export default function PerformancePage() {
       const rightMarked = right.sessions - right.excused;
       const leftRate = leftMarked ? (left.present + left.late) / leftMarked : 0;
       const rightRate = rightMarked ? (right.present + right.late) / rightMarked : 0;
-      return rightRate - leftRate || right.sessions - left.sessions || left.studentName.localeCompare(right.studentName);
+      return (
+        rightRate - leftRate ||
+        right.sessions - left.sessions ||
+        left.studentName.localeCompare(right.studentName)
+      );
     });
   }, [records]);
 
   const totals = useMemo(() => {
-    const attended = records.filter((record) => record.status === "present" || record.status === "late").length;
+    const attended = records.filter(
+      (record) => record.status === "present" || record.status === "late",
+    ).length;
     const eligible = records.filter((record) => record.status !== "excused").length;
     return {
       records: records.length,
@@ -120,10 +136,12 @@ export default function PerformancePage() {
 
   return (
     <section className="mx-auto w-full max-w-6xl px-5 py-8 sm:px-8">
-      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-accent">Athlete insights</p>
+      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-accent">
+        Athlete insights
+      </p>
       <h1 className="mt-2 text-3xl font-bold tracking-tight">Performance</h1>
       <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-        Review training consistency from attendance records across your academy.
+        Review training consistency alongside coach recorded sport assessments and notes.
       </p>
 
       <div className="mt-6 flex flex-wrap items-end gap-3 rounded-2xl border border-line bg-white p-4 shadow-sm">
@@ -138,10 +156,17 @@ export default function PerformancePage() {
       </div>
 
       <div className="mt-5 rounded-xl border border-[#e9e3c9] bg-[#fffdf3] p-4 text-sm leading-6 text-[#716743]">
-        These indicators use recorded attendance only. Discipline specific assessments, coach evaluations,
-        and athlete progress notes are not part of this data model yet.
+        Attendance indicators use recorded attendance. Progress entries are tied to a training
+        session; coaches choose whether each note is shared with the student's parent.
       </div>
-      {error ? <div role="alert" className="mt-4 rounded-xl border border-[#f2d5ce] bg-[#fff7f5] p-4 text-sm text-[#984d3f]">{error}</div> : null}
+      {error ? (
+        <div
+          role="alert"
+          className="mt-4 rounded-xl border border-[#f2d5ce] bg-[#fff7f5] p-4 text-sm text-[#984d3f]"
+        >
+          {error}
+        </div>
+      ) : null}
 
       <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {[
@@ -161,8 +186,8 @@ export default function PerformancePage() {
         <div className="border-b border-line px-5 py-4">
           <h2 className="font-semibold">Student training consistency</h2>
           <p className="mt-1 text-xs text-muted">
-            Attendance rate is present plus late marks divided by recorded present, late, and absent marks;
-            excused records are excluded.
+            Attendance rate is present plus late marks divided by recorded present, late, and absent
+            marks; excused records are excluded.
           </p>
         </div>
         {loading ? <p className="p-6 text-sm text-muted">Loading attendance data…</p> : null}
@@ -188,7 +213,9 @@ export default function PerformancePage() {
               <tbody className="divide-y divide-line">
                 {students.map((student) => {
                   const eligible = student.sessions - student.excused;
-                  const rate = eligible ? Math.round(((student.present + student.late) / eligible) * 100) : 0;
+                  const rate = eligible
+                    ? Math.round(((student.present + student.late) / eligible) * 100)
+                    : 0;
                   return (
                     <tr key={student.studentId}>
                       <td className="px-5 py-3 font-medium">{student.studentName}</td>
@@ -199,7 +226,9 @@ export default function PerformancePage() {
                       <td className="px-5 py-3">{student.absent}</td>
                       <td className="px-5 py-3">{student.excused}</td>
                       <td className="px-5 py-3 font-semibold">{rate}%</td>
-                      <td className="px-5 py-3 text-muted">{new Date(student.lastTraining).toLocaleDateString()}</td>
+                      <td className="px-5 py-3 text-muted">
+                        {new Date(student.lastTraining).toLocaleDateString()}
+                      </td>
                     </tr>
                   );
                 })}
@@ -207,6 +236,43 @@ export default function PerformancePage() {
             </table>
           </div>
         ) : null}
+      </div>
+      <div className="mt-6 overflow-hidden rounded-2xl border border-line bg-white shadow-sm">
+        <div className="border-b border-line px-5 py-4">
+          <h2 className="font-semibold">Coach assessments and notes</h2>
+          <p className="mt-1 text-xs text-muted">
+            Recent session entries from coaches. Parent-visible entries are labeled.
+          </p>
+        </div>
+        {!progressEntries.length ? (
+          <p className="p-6 text-sm text-muted">No coach progress entries yet.</p>
+        ) : (
+          <div className="divide-y divide-line">
+            {progressEntries.map((entry) => (
+              <article key={entry.id} className="px-5 py-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-medium">
+                    {entry.studentName} · {entry.sportName} · {entry.assessmentName}
+                    {entry.value ? `: ${entry.value}` : ""}
+                  </p>
+                  <span className="text-xs text-muted">
+                    {entry.parentVisible ? "Shared with parent" : "Coach only"}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-muted">
+                  {entry.batchName} · {entry.coachName} ·{" "}
+                  {new Intl.DateTimeFormat("en-IN", {
+                    dateStyle: "medium",
+                    timeZone: timezone,
+                  }).format(new Date(entry.createdAt))}
+                </p>
+                {entry.coachNote ? (
+                  <p className="mt-2 text-sm leading-6">{entry.coachNote}</p>
+                ) : null}
+              </article>
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );

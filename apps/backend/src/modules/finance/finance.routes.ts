@@ -1,4 +1,4 @@
-import { Router, type Request } from "express";
+import { Router } from "express";
 import { z } from "zod";
 import {
   CreateExpenseRequestSchema,
@@ -13,23 +13,8 @@ import {
 } from "@sportdesk/contracts";
 import type { SportDeskAuthService } from "../auth/auth.service.js";
 import { AuthError } from "../auth/auth.service.js";
+import { authenticatedUser, requirePermission } from "../auth/authorization.js";
 import type { SportDeskFinanceService } from "./finance.service.js";
-
-async function userFromRequest(request: Request, auth: SportDeskAuthService) {
-  const token = request.get("authorization")?.match(/^Bearer ([A-Za-z0-9._~-]+)$/)?.[1];
-  if (!token) throw new AuthError(401, "UNAUTHENTICATED", "Authentication is required.");
-  const user = await auth.authenticate(token);
-  if (!user) throw new AuthError(401, "UNAUTHENTICATED", "Authentication is required.");
-  return user;
-}
-
-async function ownerFromRequest(request: Request, auth: SportDeskAuthService) {
-  const user = await userFromRequest(request, auth);
-  if (user.role !== "owner") {
-    throw new AuthError(403, "FORBIDDEN", "Owner access is required for finance records.");
-  }
-  return user;
-}
 
 export function createFinanceRouter(options: {
   auth: SportDeskAuthService;
@@ -38,19 +23,19 @@ export function createFinanceRouter(options: {
   const router = Router();
 
   router.get("/finance/summary", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "payments:read");
     const range = FinanceDateRangeQuerySchema.parse(request.query);
     response.status(200).json({ data: await options.finance.getSummary(user.academyId, range) });
   });
 
   router.get("/finance/charges", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "payments:read");
     const query = FeeChargeQuerySchema.parse(request.query);
     response.status(200).json({ data: await options.finance.listCharges(user.academyId, query) });
   });
 
   router.post("/finance/charges", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "payments:record");
     const input = CreateFeeChargeRequestSchema.parse(request.body);
     const record = await options.finance.createCharge({
       ...input,
@@ -61,7 +46,7 @@ export function createFinanceRouter(options: {
   });
 
   router.post("/finance/charges/:chargeId/payments", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "payments:record");
     const chargeId = z.string().uuid().parse(request.params.chargeId);
     const input = RecordFeePaymentRequestSchema.parse(request.body);
     const result = await options.finance.recordPayment({
@@ -74,7 +59,7 @@ export function createFinanceRouter(options: {
   });
 
   router.post("/finance/payments/:paymentId/refunds", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "payments:record");
     const paymentId = z.string().uuid().parse(request.params.paymentId);
     const input = RefundFeePaymentRequestSchema.parse(request.body);
     const result = await options.finance.refundPayment({
@@ -87,7 +72,7 @@ export function createFinanceRouter(options: {
   });
 
   router.post("/finance/charges/:chargeId/void", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "payments:record");
     const chargeId = z.string().uuid().parse(request.params.chargeId);
     const input = VoidFeeChargeRequestSchema.parse(request.body);
     const result = await options.finance.voidCharge({
@@ -100,13 +85,13 @@ export function createFinanceRouter(options: {
   });
 
   router.get("/finance/expenses", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "payments:read");
     const query = ExpenseQuerySchema.parse(request.query);
     response.status(200).json({ data: await options.finance.listExpenses(user.academyId, query) });
   });
 
   router.post("/finance/expenses", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "expenses:manage");
     const input = CreateExpenseRequestSchema.parse(request.body);
     const record = await options.finance.createExpense({
       ...input,
@@ -117,7 +102,7 @@ export function createFinanceRouter(options: {
   });
 
   router.post("/finance/expenses/:expenseId/void", async (request, response) => {
-    const user = await ownerFromRequest(request, options.auth);
+    const user = await requirePermission(request, options.auth, "expenses:manage");
     const expenseId = z.string().uuid().parse(request.params.expenseId);
     const input = VoidExpenseRequestSchema.parse(request.body);
     const result = await options.finance.voidExpense({
@@ -130,7 +115,7 @@ export function createFinanceRouter(options: {
   });
 
   router.get("/parent/students/:studentId/finance", async (request, response) => {
-    const user = await userFromRequest(request, options.auth);
+    const user = await authenticatedUser(request, options.auth);
     if (user.role !== "parent") {
       throw new AuthError(403, "FORBIDDEN", "Parent access is required for this view.");
     }

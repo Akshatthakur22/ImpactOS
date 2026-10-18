@@ -6,10 +6,16 @@ import {
   type AdminAttendanceEntry,
   type AttendanceCorrectionEntry,
   type AttendanceStatus,
+  type AttendanceSessionSummary,
 } from "@sportdesk/contracts";
 import { Button } from "@/components/ui/button";
 import { calendarDateInTimezone, dateRangeInTimezone } from "@/lib/academy-time";
-import { correctAttendance, getAttendance, getAttendanceCorrections } from "@/lib/operations-api";
+import {
+  correctAttendance,
+  getAttendance,
+  getAttendanceCorrections,
+  getAttendanceSessions,
+} from "@/lib/operations-api";
 import { useAuth } from "@/hooks/use-auth";
 import { getAcademySettings } from "@/lib/settings-api";
 
@@ -27,6 +33,12 @@ export default function AttendancePage() {
   const [to, setTo] = useState("");
   const [timezone, setTimezone] = useState("Asia/Kolkata");
   const [records, setRecords] = useState<AdminAttendanceEntry[]>([]);
+  const [sessionSummaries, setSessionSummaries] = useState<AttendanceSessionSummary[]>([]);
+  const [batchFilter, setBatchFilter] = useState("");
+  const [coachFilter, setCoachFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState<AttendanceStatus | "all">("all");
+  const [view, setView] = useState<"sessions" | "records">("sessions");
+  const [selectedSessionId, setSelectedSessionId] = useState("");
   const [statusesById, setStatusesById] = useState<Record<string, AttendanceStatus>>({});
   const [reasonsById, setReasonsById] = useState<Record<string, string>>({});
   const [correctionsById, setCorrectionsById] = useState<
@@ -40,8 +52,20 @@ export default function AttendancePage() {
 
   async function load(token: string) {
     const range = dateRangeInTimezone(from, to, timezone);
-    const result = await getAttendance(token, refreshSession, range.from, range.to);
+    const [result, sessions] = await Promise.all([
+      getAttendance(token, refreshSession, range.from, range.to, {
+        ...(batchFilter ? { batchId: batchFilter } : {}),
+      }),
+      getAttendanceSessions(
+        token,
+        refreshSession,
+        new Date(range.from),
+        new Date(range.to),
+        batchFilter || undefined,
+      ),
+    ]);
     setRecords(result.records);
+    setSessionSummaries(sessions.sessions);
     setStatusesById(Object.fromEntries(result.records.map((record) => [record.id, record.status])));
   }
 
@@ -50,9 +74,17 @@ export default function AttendancePage() {
     getAcademySettings(accessToken, refreshSession)
       .then((settings) => {
         setTimezone(settings.timezone);
-        const today = calendarDateInTimezone(new Date(), settings.timezone);
-        setFrom((current) => current || today);
-        setTo((current) => current || today);
+        const today = new Date();
+        setFrom(
+          (current) =>
+            current ||
+            calendarDateInTimezone(new Date(today.getTime() - 7 * 86_400_000), settings.timezone),
+        );
+        setTo(
+          (current) =>
+            current ||
+            calendarDateInTimezone(new Date(today.getTime() + 30 * 86_400_000), settings.timezone),
+        );
       })
       .catch((caught: unknown) =>
         setError(caught instanceof Error ? caught.message : "Could not load academy timezone."),
@@ -68,7 +100,65 @@ export default function AttendancePage() {
         setError(caught instanceof Error ? caught.message : "Could not load attendance."),
       )
       .finally(() => setLoading(false));
-  }, [accessToken, from, refreshSession, to, timezone]);
+  }, [accessToken, batchFilter, coachFilter, from, refreshSession, to, timezone]);
+
+  const visibleRecords = records.filter(
+    (record) =>
+      (statusFilter === "all" || record.status === statusFilter) &&
+      (!coachFilter || record.recordedBy === coachFilter) &&
+      (!selectedSessionId || record.sessionId === selectedSessionId),
+  );
+  const unmarkedSessions = sessionSummaries.filter(
+    (session) => session.expectedCount > session.markedCount,
+  );
+  const statusCounts = statuses.map((status) => ({
+    status,
+    count: records.filter((record) => record.status === status).length,
+  }));
+  const batches = [
+    ...new Map(sessionSummaries.map((session) => [session.batchId, session.batchName])).entries(),
+  ];
+  const coaches = [
+    ...new Map(records.map((record) => [record.recordedBy, record.recorderName])).entries(),
+  ];
+
+  function exportVisibleRecords() {
+    const cell = (value: string | number) => {
+      let safe = String(value);
+      if (/^[=+@\-\t\r]/.test(safe)) safe = `'${safe}`;
+      return `"${safe.replaceAll('"', '""')}"`;
+    };
+    const rows = [
+      ["Student", "Batch", "Session date", "Status", "Recorded by", "Recorded at", "Corrections"],
+      ...visibleRecords.map((record) => [
+        record.studentName,
+        record.batchName,
+        new Intl.DateTimeFormat("en-IN", {
+          dateStyle: "short",
+          timeStyle: "short",
+          timeZone: timezone,
+        }).format(new Date(record.scheduledStart)),
+        statusLabels[record.status],
+        record.recorderName,
+        new Intl.DateTimeFormat("en-IN", {
+          dateStyle: "short",
+          timeStyle: "short",
+          timeZone: timezone,
+        }).format(new Date(record.recordedAt)),
+        record.correctionCount,
+      ]),
+    ];
+    const url = URL.createObjectURL(
+      new Blob([`\uFEFF${rows.map((row) => row.map(cell).join(",")).join("\r\n")}`], {
+        type: "text/csv;charset=utf-8",
+      }),
+    );
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `attendance-${from}-to-${to}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
 
   async function applyFilter() {
     if (!accessToken || from > to) {
@@ -137,59 +227,221 @@ export default function AttendancePage() {
 
   return (
     <div className="mx-auto max-w-[1200px] px-5 py-8 sm:px-8 sm:py-10">
-        <p className="text-sm font-medium text-accent">Daily operations</p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em]">Attendance review</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-          Review coach-submitted records and keep a reason with every owner correction.
-        </p>
+      <p className="text-sm font-medium text-accent">Daily operations</p>
+      <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em]">Attendance review</h1>
+      <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
+        Review coach-submitted records and keep a reason with every owner correction.
+      </p>
 
-        {error && (
-          <div
-            role="alert"
-            className="mt-6 rounded-xl border border-[#f1d8d2] bg-[#fff7f5] px-4 py-3 text-sm text-[#984d3f]"
-          >
-            {error}
+      {error && (
+        <div
+          role="alert"
+          className="mt-6 rounded-xl border border-[#f1d8d2] bg-[#fff7f5] px-4 py-3 text-sm text-[#984d3f]"
+        >
+          {error}
+        </div>
+      )}
+      {notice && (
+        <div
+          role="status"
+          className="mt-6 rounded-xl border border-[#cce3dd] bg-[#eff8f5] px-4 py-3 text-sm text-accent"
+        >
+          {notice}
+        </div>
+      )}
+
+      <section className="mt-8 flex flex-wrap items-end gap-3 rounded-2xl border border-line bg-white p-5">
+        <label className="grid gap-2 text-xs font-semibold text-muted">
+          From
+          <InputDate value={from} onChange={setFrom} />
+        </label>
+        <label className="grid gap-2 text-xs font-semibold text-muted">
+          To
+          <InputDate value={to} onChange={setTo} />
+        </label>
+        <Button variant="outline" onClick={() => void applyFilter()} disabled={loading}>
+          Apply dates
+        </Button>
+      </section>
+
+      <section className="mt-6 rounded-2xl border border-line bg-white p-5">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 className="font-semibold">Attendance operations</h2>
+            <p className="mt-1 text-xs text-muted">
+              {sessionSummaries.length} sessions · {unmarkedSessions.length} with unmarked
+              attendance · {records.length} recorded marks
+            </p>
           </div>
-        )}
-        {notice && (
-          <div
-            role="status"
-            className="mt-6 rounded-xl border border-[#cce3dd] bg-[#eff8f5] px-4 py-3 text-sm text-accent"
-          >
-            {notice}
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant={view === "sessions" ? "default" : "outline"}
+              onClick={() => {
+                setView("sessions");
+                setSelectedSessionId("");
+              }}
+            >
+              Session queue
+            </Button>
+            <Button
+              size="sm"
+              variant={view === "records" ? "default" : "outline"}
+              onClick={() => setView("records")}
+            >
+              Recorded marks
+            </Button>
           </div>
-        )}
-
-        <section className="mt-8 flex flex-wrap items-end gap-3 rounded-2xl border border-line bg-white p-5">
-          <label className="grid gap-2 text-xs font-semibold text-muted">
-            From
-            <InputDate value={from} onChange={setFrom} />
-          </label>
-          <label className="grid gap-2 text-xs font-semibold text-muted">
-            To
-            <InputDate value={to} onChange={setTo} />
-          </label>
-          <Button variant="outline" onClick={() => void applyFilter()} disabled={loading}>
-            Apply dates
-          </Button>
-        </section>
-
-        <section className="mt-6 overflow-hidden rounded-2xl border border-line bg-white">
-          <div className="flex items-center justify-between border-b border-line px-5 py-4">
-            <h2 className="font-semibold">Recorded attendance</h2>
-            <span className="text-xs text-muted">
-              {records.length} record{records.length === 1 ? "" : "s"}
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2 text-xs">
+          {statusCounts.map(({ status, count }) => (
+            <span key={status} className="rounded-full bg-[#f4f6f7] px-3 py-1.5 text-muted">
+              {statusLabels[status]} {count}
             </span>
+          ))}
+        </div>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <label className="grid gap-1 text-xs font-semibold text-muted">
+            Batch
+            <select
+              className="h-10 min-w-48 rounded-xl border border-line bg-white px-3 text-sm font-normal text-foreground"
+              value={batchFilter}
+              onChange={(event) => setBatchFilter(event.target.value)}
+            >
+              <option value="">All batches</option>
+              {batches.map(([id, name]) => (
+                <option key={id} value={id}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {view === "records" && (
+            <label className="grid gap-1 text-xs font-semibold text-muted">
+              Coach recorded by
+              <select
+                className="h-10 min-w-48 rounded-xl border border-line bg-white px-3 text-sm font-normal text-foreground"
+                value={coachFilter}
+                onChange={(event) => setCoachFilter(event.target.value)}
+              >
+                <option value="">All coaches</option>
+                {coaches.map(([id, name]) => (
+                  <option key={id} value={id}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {view === "records" && (
+            <label className="grid gap-1 text-xs font-semibold text-muted">
+              Status
+              <select
+                className="h-10 min-w-40 rounded-xl border border-line bg-white px-3 text-sm font-normal text-foreground"
+                value={statusFilter}
+                onChange={(event) =>
+                  setStatusFilter(event.target.value as AttendanceStatus | "all")
+                }
+              >
+                <option value="all">All statuses</option>
+                {statuses.map((status) => (
+                  <option key={status} value={status}>
+                    {statusLabels[status]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
+      </section>
+
+      {view === "sessions" ? (
+        <section className="mt-4 overflow-hidden rounded-2xl border border-line bg-white">
+          <div className="flex items-center justify-between border-b border-line px-5 py-4">
+            <h2 className="font-semibold">Session-first attendance queue</h2>
+            <span className="text-xs text-muted">{unmarkedSessions.length} need attention</span>
           </div>
           {loading ? (
+            <p className="px-5 py-8 text-sm text-muted">Loading sessions…</p>
+          ) : sessionSummaries.length === 0 ? (
+            <p className="px-5 py-8 text-sm text-muted">No sessions in this date range.</p>
+          ) : (
+            <div className="divide-y divide-line">
+              {sessionSummaries.map((session) => (
+                <article
+                  key={session.id}
+                  className="flex flex-wrap items-center justify-between gap-4 px-5 py-4"
+                >
+                  <div>
+                    <p className="font-medium">
+                      {session.batchName}
+                      {session.branchName ? ` · ${session.branchName}` : ""}
+                    </p>
+                    <p className="mt-1 text-xs text-muted">
+                      {new Intl.DateTimeFormat("en-IN", {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                        timeZone: timezone,
+                      }).format(new Date(session.startsAt))}{" "}
+                      · {session.status}
+                    </p>
+                    <p className="mt-1 text-xs text-muted">
+                      {session.markedCount} of {session.expectedCount} students marked
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setSelectedSessionId(session.id);
+                      setView("records");
+                    }}
+                  >
+                    {session.markedCount ? "Review marks" : "No marks yet"}
+                  </Button>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      {view === "records" ? (
+        <section className="mt-4 overflow-hidden rounded-2xl border border-line bg-white">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
+            <div>
+              <h2 className="font-semibold">Recorded attendance</h2>
+              <span className="text-xs text-muted">
+                {visibleRecords.length} matching mark{visibleRecords.length === 1 ? "" : "s"}
+                {selectedSessionId ? " · selected session" : ""}
+              </span>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!visibleRecords.length}
+              onClick={exportVisibleRecords}
+            >
+              Export filtered CSV
+            </Button>
+          </div>
+          {selectedSessionId ? (
+            <button
+              className="px-5 pt-3 text-xs font-semibold text-accent hover:underline"
+              onClick={() => setSelectedSessionId("")}
+            >
+              Show all sessions
+            </button>
+          ) : null}
+          {loading ? (
             <p className="px-5 py-8 text-sm text-muted">Loading attendance…</p>
-          ) : records.length === 0 ? (
+          ) : visibleRecords.length === 0 ? (
             <p className="px-5 py-8 text-sm text-muted">
               No attendance was recorded in this date range.
             </p>
           ) : (
             <div className="divide-y divide-line">
-              {records.map((record) => {
+              {visibleRecords.map((record) => {
                 const changed = (statusesById[record.id] ?? record.status) !== record.status;
                 return (
                   <article
@@ -199,11 +451,20 @@ export default function AttendancePage() {
                     <div>
                       <div className="font-medium">{record.studentName}</div>
                       <div className="mt-1 text-sm text-muted">
-                        {record.batchName} · {new Date(record.scheduledStart).toLocaleString()}
+                        {record.batchName} ·{" "}
+                        {new Intl.DateTimeFormat("en-IN", {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                          timeZone: timezone,
+                        }).format(new Date(record.scheduledStart))}
                       </div>
                       <div className="mt-1 text-xs text-muted">
                         Recorded by {record.recorderName} ·{" "}
-                        {new Date(record.recordedAt).toLocaleString()}
+                        {new Intl.DateTimeFormat("en-IN", {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                          timeZone: timezone,
+                        }).format(new Date(record.recordedAt))}
                       </div>
                     </div>
                     <div className="grid gap-2 sm:grid-cols-[1fr_1.4fr_auto] lg:grid-cols-1 xl:grid-cols-[1fr_1.4fr_auto]">
@@ -267,7 +528,11 @@ export default function AttendancePage() {
                                 <span>
                                   {" "}
                                   · {correction.reason} · {correction.correctedByName} ·{" "}
-                                  {new Date(correction.correctedAt).toLocaleString()}
+                                  {new Intl.DateTimeFormat("en-IN", {
+                                    dateStyle: "medium",
+                                    timeStyle: "short",
+                                    timeZone: timezone,
+                                  }).format(new Date(correction.correctedAt))}
                                 </span>
                               </div>
                             ))}
@@ -284,7 +549,8 @@ export default function AttendancePage() {
             </div>
           )}
         </section>
-      </div>
+      ) : null}
+    </div>
   );
 }
 

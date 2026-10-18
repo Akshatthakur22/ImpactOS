@@ -1,6 +1,11 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { SignJWT, jwtVerify } from "jose";
-import type { AuthData, ClientType, PublicUser } from "@sportdesk/contracts";
+import {
+  PermissionSchema,
+  type AuthData,
+  type ClientType,
+  type PublicUser,
+} from "@sportdesk/contracts";
 import type { AuthRepository, UserWithAcademy } from "../../db/auth.repository.js";
 
 export class AuthError extends Error {
@@ -36,6 +41,15 @@ function hashToken(token: string): string {
 }
 
 function toPublicUser(user: UserWithAcademy): PublicUser {
+  const permissions =
+    user.role === "owner"
+      ? PermissionSchema.options
+      : user.role === "staff"
+        ? user.permissions.flatMap((permission) => {
+            const parsed = PermissionSchema.safeParse(permission);
+            return parsed.success ? [parsed.data] : [];
+          })
+        : [];
   return {
     id: user.id,
     academyId: user.academyId,
@@ -43,6 +57,8 @@ function toPublicUser(user: UserWithAcademy): PublicUser {
     displayName: user.displayName,
     role: user.role,
     academyName: user.academyName,
+    academyTimezone: user.academyTimezone,
+    permissions,
   };
 }
 
