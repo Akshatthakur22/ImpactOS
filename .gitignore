@@ -1,0 +1,17 @@
+node_modules/
+.pnpm-store/
+**/.next/
+**/dist/
+**/coverage/
+**/.expo/
+**/web-build/
+**/android/
+**/ios/
+*.tsbuildinfo
+.DS_Store
+.env
+.env.*
+!.env.example
+!.env.*.example
+playwright-report/
+test-results/
