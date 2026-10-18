@@ -16,6 +16,7 @@ type AuthContextValue = {
   user: PublicUser | null;
   accessToken: string | null;
   loading: boolean;
+  sessionRestoreError: string | null;
   refreshSession: () => Promise<string | null>;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -39,17 +40,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
+  const [sessionRestoreError, setSessionRestoreError] = useState<string | null>(null);
 
   const refreshSession = useCallback(async () => {
-    const data = await refreshWebSession();
-    if (!data) {
-      setUser(null);
-      setAccessToken(null);
-      setExpiresAt(null);
-      return null;
+    try {
+      const data = await refreshWebSession();
+      if (!data) {
+        setUser(null);
+        setAccessToken(null);
+        setExpiresAt(null);
+        setSessionRestoreError(null);
+        return null;
+      }
+      applyAuth(data, setUser, setAccessToken, setExpiresAt);
+      setSessionRestoreError(null);
+      return data.accessToken;
+    } catch (error) {
+      setSessionRestoreError(
+        error instanceof Error ? error.message : "Could not restore your session. Try again.",
+      );
+      throw error;
     }
-    applyAuth(data, setUser, setAccessToken, setExpiresAt);
-    return data.accessToken;
   }, []);
 
   useEffect(() => {
@@ -66,16 +77,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!accessToken || !expiresAt) return;
-    const delay = Math.max(1_000, expiresAt - Date.now() - 60_000);
-    const timer = window.setTimeout(() => {
-      void refreshSession().catch(() => undefined);
-    }, delay);
-    return () => window.clearTimeout(timer);
+    let active = true;
+    let timer: number | undefined;
+
+    const attemptRefresh = () => {
+      void refreshSession().catch(() => {
+        if (active) timer = window.setTimeout(attemptRefresh, 15_000);
+      });
+    };
+
+    timer = window.setTimeout(attemptRefresh, Math.max(1_000, expiresAt - Date.now() - 60_000));
+    return () => {
+      active = false;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, [accessToken, expiresAt, refreshSession]);
 
   const login = useCallback(async (email: string, password: string) => {
     const data = await loginWithPassword(email, password);
     applyAuth(data, setUser, setAccessToken, setExpiresAt);
+    setSessionRestoreError(null);
   }, []);
 
   const logout = useCallback(async () => {
@@ -85,12 +106,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null);
       setAccessToken(null);
       setExpiresAt(null);
+      setSessionRestoreError(null);
     }
   }, []);
 
   const value = useMemo(
-    () => ({ user, accessToken, loading, refreshSession, login, logout }),
-    [user, accessToken, loading, refreshSession, login, logout],
+    () => ({
+      user,
+      accessToken,
+      loading,
+      sessionRestoreError,
+      refreshSession,
+      login,
+      logout,
+    }),
+    [user, accessToken, loading, sessionRestoreError, refreshSession, login, logout],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

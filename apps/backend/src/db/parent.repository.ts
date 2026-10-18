@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import type { Database } from "./client.js";
 import {
+  academyBranches,
   attendanceRecords,
   batchSchedules,
   batches,
@@ -30,6 +31,28 @@ export class ParentRepositoryError extends Error {
 
 export function createParentRepository(db: Database) {
   return {
+    async revokeInvite(input: { academyId: string; guardianId: string; now: Date }) {
+      const [guardian] = await db
+        .select({ id: guardians.id })
+        .from(guardians)
+        .where(and(eq(guardians.id, input.guardianId), eq(guardians.academyId, input.academyId)))
+        .limit(1);
+      if (!guardian) throw new ParentRepositoryError("GUARDIAN_NOT_FOUND");
+      const revoked = await db
+        .update(guardianInvites)
+        .set({ revokedAt: input.now })
+        .where(
+          and(
+            eq(guardianInvites.academyId, input.academyId),
+            eq(guardianInvites.guardianId, input.guardianId),
+            isNull(guardianInvites.redeemedAt),
+            isNull(guardianInvites.revokedAt),
+          ),
+        )
+        .returning({ id: guardianInvites.id });
+      return { revoked: revoked.length > 0 };
+    },
+
     async createInvite(input: {
       academyId: string;
       guardianId: string;
@@ -281,6 +304,7 @@ export function createParentRepository(db: Database) {
           id: batchSchedules.id,
           batchId: batches.id,
           batchName: batches.name,
+          branchName: academyBranches.name,
           dayOfWeek: batchSchedules.dayOfWeek,
           startTime: batchSchedules.startTime,
           endTime: batchSchedules.endTime,
@@ -291,6 +315,13 @@ export function createParentRepository(db: Database) {
         .innerJoin(enrollments, eq(studentGuardians.studentId, enrollments.studentId))
         .innerJoin(batches, eq(enrollments.batchId, batches.id))
         .innerJoin(batchSchedules, eq(batchSchedules.batchId, batches.id))
+        .leftJoin(
+          academyBranches,
+          and(
+            eq(batchSchedules.branchId, academyBranches.id),
+            eq(batchSchedules.academyId, academyBranches.academyId),
+          ),
+        )
         .where(
           and(
             eq(studentGuardians.academyId, academyId),

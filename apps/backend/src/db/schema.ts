@@ -2,6 +2,7 @@ import { relations, sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  date,
   foreignKey,
   index,
   integer,
@@ -37,6 +38,11 @@ export const attendanceStatus = pgEnum("attendance_status", [
   "excused",
 ]);
 export const coachStatus = pgEnum("coach_status", ["active", "inactive"]);
+export const feeChargeStatus = pgEnum("fee_charge_status", ["issued", "voided"]);
+export const feePaymentMethod = pgEnum("fee_payment_method", ["cash", "upi", "bank_transfer"]);
+export const expenseStatus = pgEnum("expense_status", ["recorded", "voided"]);
+export const announcementStatus = pgEnum("announcement_status", ["draft", "published", "archived"]);
+export const announcementAudience = pgEnum("announcement_audience", ["everyone", "parents", "coaches"]);
 
 export const academies = pgTable(
   "academies",
@@ -71,6 +77,36 @@ export const users = pgTable(
     uniqueIndex("users_email_uq").on(table.email),
     uniqueIndex("users_id_academy_uq").on(table.id, table.academyId),
     index("users_academy_role_idx").on(table.academyId, table.role),
+  ],
+);
+
+export const academyBranches = pgTable(
+  "academy_branches",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    academyId: uuid("academy_id")
+      .notNull()
+      .references(() => academies.id, { onDelete: "restrict" }),
+    name: varchar("name", { length: 120 }).notNull(),
+    address: varchar("address", { length: 500 }),
+    isActive: boolean("is_active").notNull().default(true),
+    createdBy: uuid("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("academy_branches_id_academy_uq").on(table.id, table.academyId),
+    uniqueIndex("academy_branches_academy_name_uq").on(
+      table.academyId,
+      sql`lower(${table.name})`,
+    ),
+    index("academy_branches_academy_active_idx").on(table.academyId, table.isActive),
+    check("academy_branches_name_nonempty_chk", sql`length(btrim(${table.name})) > 0`),
+    foreignKey({
+      name: "academy_branches_created_by_academy_fk",
+      columns: [table.createdBy, table.academyId],
+      foreignColumns: [users.id, users.academyId],
+    }).onDelete("restrict"),
   ],
 );
 
@@ -379,6 +415,187 @@ export const enrollments = pgTable(
   ],
 );
 
+export const financeCounters = pgTable("finance_counters", {
+  academyId: uuid("academy_id")
+    .primaryKey()
+    .references(() => academies.id, { onDelete: "restrict" }),
+  lastInvoiceNumber: integer("last_invoice_number").notNull().default(0),
+  lastReceiptNumber: integer("last_receipt_number").notNull().default(0),
+});
+
+export const feeCharges = pgTable(
+  "fee_charges",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    academyId: uuid("academy_id")
+      .notNull()
+      .references(() => academies.id, { onDelete: "restrict" }),
+    studentId: uuid("student_id").notNull(),
+    invoiceNumber: varchar("invoice_number", { length: 32 }).notNull(),
+    description: varchar("description", { length: 200 }).notNull(),
+    billingPeriod: varchar("billing_period", { length: 80 }),
+    dueDate: date("due_date", { mode: "string" }).notNull(),
+    amountPaise: integer("amount_paise").notNull(),
+    discountPaise: integer("discount_paise").notNull().default(0),
+    discountReason: varchar("discount_reason", { length: 240 }),
+    currency: varchar("currency", { length: 3 }).notNull(),
+    status: feeChargeStatus("status").notNull().default("issued"),
+    voidedAt: timestamp("voided_at", { withTimezone: true, mode: "date" }),
+    voidedBy: uuid("voided_by"),
+    voidReason: varchar("void_reason", { length: 240 }),
+    createdBy: uuid("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("fee_charges_id_academy_uq").on(table.id, table.academyId),
+    uniqueIndex("fee_charges_invoice_number_uq").on(table.academyId, table.invoiceNumber),
+    index("fee_charges_student_due_idx").on(table.academyId, table.studentId, table.dueDate),
+    index("fee_charges_academy_status_due_idx").on(table.academyId, table.status, table.dueDate),
+    check("fee_charges_amount_positive_chk", sql`${table.amountPaise} > 0`),
+    check(
+      "fee_charges_discount_valid_chk",
+      sql`${table.discountPaise} >= 0 AND ${table.discountPaise} <= ${table.amountPaise}`,
+    ),
+    check(
+      "fee_charges_discount_reason_chk",
+      sql`${table.discountPaise} = 0 OR (${table.discountReason} IS NOT NULL AND length(btrim(${table.discountReason})) > 0)`,
+    ),
+    check(
+      "fee_charges_void_consistent_chk",
+      sql`(${table.status} = 'issued' AND ${table.voidedAt} IS NULL AND ${table.voidedBy} IS NULL AND ${table.voidReason} IS NULL) OR (${table.status} = 'voided' AND ${table.voidedAt} IS NOT NULL AND ${table.voidedBy} IS NOT NULL AND ${table.voidReason} IS NOT NULL)`,
+    ),
+    foreignKey({
+      name: "fee_charges_student_academy_fk",
+      columns: [table.studentId, table.academyId],
+      foreignColumns: [students.id, students.academyId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fee_charges_created_by_academy_fk",
+      columns: [table.createdBy, table.academyId],
+      foreignColumns: [users.id, users.academyId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fee_charges_voided_by_academy_fk",
+      columns: [table.voidedBy, table.academyId],
+      foreignColumns: [users.id, users.academyId],
+    }).onDelete("restrict"),
+  ],
+);
+
+export const feePayments = pgTable(
+  "fee_payments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    academyId: uuid("academy_id")
+      .notNull()
+      .references(() => academies.id, { onDelete: "restrict" }),
+    chargeId: uuid("charge_id").notNull(),
+    receiptNumber: varchar("receipt_number", { length: 32 }).notNull(),
+    idempotencyKey: varchar("idempotency_key", { length: 100 }).notNull(),
+    amountPaise: integer("amount_paise").notNull(),
+    method: feePaymentMethod("method").notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true, mode: "date" }).notNull(),
+    reference: varchar("reference", { length: 120 }),
+    note: varchar("note", { length: 240 }),
+    createdBy: uuid("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("fee_payments_id_academy_uq").on(table.id, table.academyId),
+    uniqueIndex("fee_payments_receipt_number_uq").on(table.academyId, table.receiptNumber),
+    uniqueIndex("fee_payments_idempotency_uq").on(table.academyId, table.idempotencyKey),
+    index("fee_payments_charge_received_idx").on(table.academyId, table.chargeId, table.receivedAt),
+    check("fee_payments_amount_positive_chk", sql`${table.amountPaise} > 0`),
+    foreignKey({
+      name: "fee_payments_charge_academy_fk",
+      columns: [table.chargeId, table.academyId],
+      foreignColumns: [feeCharges.id, feeCharges.academyId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fee_payments_created_by_academy_fk",
+      columns: [table.createdBy, table.academyId],
+      foreignColumns: [users.id, users.academyId],
+    }).onDelete("restrict"),
+  ],
+);
+
+export const feeRefunds = pgTable(
+  "fee_refunds",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    academyId: uuid("academy_id")
+      .notNull()
+      .references(() => academies.id, { onDelete: "restrict" }),
+    paymentId: uuid("payment_id").notNull(),
+    idempotencyKey: varchar("idempotency_key", { length: 100 }).notNull(),
+    amountPaise: integer("amount_paise").notNull(),
+    reason: varchar("reason", { length: 240 }).notNull(),
+    refundedAt: timestamp("refunded_at", { withTimezone: true, mode: "date" }).notNull(),
+    createdBy: uuid("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("fee_refunds_id_academy_uq").on(table.id, table.academyId),
+    uniqueIndex("fee_refunds_idempotency_uq").on(table.academyId, table.idempotencyKey),
+    index("fee_refunds_payment_idx").on(table.academyId, table.paymentId, table.refundedAt),
+    check("fee_refunds_amount_positive_chk", sql`${table.amountPaise} > 0`),
+    foreignKey({
+      name: "fee_refunds_payment_academy_fk",
+      columns: [table.paymentId, table.academyId],
+      foreignColumns: [feePayments.id, feePayments.academyId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fee_refunds_created_by_academy_fk",
+      columns: [table.createdBy, table.academyId],
+      foreignColumns: [users.id, users.academyId],
+    }).onDelete("restrict"),
+  ],
+);
+
+export const academyExpenses = pgTable(
+  "academy_expenses",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    academyId: uuid("academy_id")
+      .notNull()
+      .references(() => academies.id, { onDelete: "restrict" }),
+    category: varchar("category", { length: 80 }).notNull(),
+    description: varchar("description", { length: 200 }).notNull(),
+    payeeName: varchar("payee_name", { length: 160 }),
+    amountPaise: integer("amount_paise").notNull(),
+    method: feePaymentMethod("method").notNull(),
+    spentAt: timestamp("spent_at", { withTimezone: true, mode: "date" }).notNull(),
+    reference: varchar("reference", { length: 120 }),
+    note: varchar("note", { length: 240 }),
+    status: expenseStatus("status").notNull().default("recorded"),
+    voidedAt: timestamp("voided_at", { withTimezone: true, mode: "date" }),
+    voidedBy: uuid("voided_by"),
+    voidReason: varchar("void_reason", { length: 240 }),
+    createdBy: uuid("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("academy_expenses_id_academy_uq").on(table.id, table.academyId),
+    index("academy_expenses_academy_spent_idx").on(table.academyId, table.spentAt),
+    index("academy_expenses_academy_category_idx").on(table.academyId, table.category),
+    check("academy_expenses_amount_positive_chk", sql`${table.amountPaise} > 0`),
+    check(
+      "academy_expenses_void_consistent_chk",
+      sql`(${table.status} = 'recorded' AND ${table.voidedAt} IS NULL AND ${table.voidedBy} IS NULL AND ${table.voidReason} IS NULL) OR (${table.status} = 'voided' AND ${table.voidedAt} IS NOT NULL AND ${table.voidedBy} IS NOT NULL AND ${table.voidReason} IS NOT NULL)`,
+    ),
+    foreignKey({
+      name: "academy_expenses_created_by_academy_fk",
+      columns: [table.createdBy, table.academyId],
+      foreignColumns: [users.id, users.academyId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "academy_expenses_voided_by_academy_fk",
+      columns: [table.voidedBy, table.academyId],
+      foreignColumns: [users.id, users.academyId],
+    }).onDelete("restrict"),
+  ],
+);
+
 export const coachProfiles = pgTable(
   "coach_profiles",
   {
@@ -446,6 +663,83 @@ export const batchCoaches = pgTable(
   ],
 );
 
+export const academyAnnouncements = pgTable(
+  "academy_announcements",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    academyId: uuid("academy_id")
+      .notNull()
+      .references(() => academies.id, { onDelete: "restrict" }),
+    title: varchar("title", { length: 160 }).notNull(),
+    body: text("body").notNull(),
+    audience: announcementAudience("audience").notNull().default("parents"),
+    batchId: uuid("batch_id"),
+    status: announcementStatus("status").notNull().default("draft"),
+    createdBy: uuid("created_by").notNull(),
+    publishedAt: timestamp("published_at", { withTimezone: true, mode: "date" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("academy_announcements_id_academy_uq").on(table.id, table.academyId),
+    index("academy_announcements_academy_status_idx").on(
+      table.academyId,
+      table.status,
+      table.updatedAt,
+    ),
+    check("academy_announcements_title_nonempty_chk", sql`length(btrim(${table.title})) > 0`),
+    check(
+      "academy_announcements_everyone_batch_chk",
+      sql`${table.audience} <> 'everyone' OR ${table.batchId} IS NULL`,
+    ),
+    check(
+      "academy_announcements_body_length_chk",
+      sql`length(btrim(${table.body})) BETWEEN 1 AND 4000`,
+    ),
+    check(
+      "academy_announcements_published_at_chk",
+      sql`${table.status} <> 'published' OR ${table.publishedAt} IS NOT NULL`,
+    ),
+    foreignKey({
+      name: "academy_announcements_batch_academy_fk",
+      columns: [table.batchId, table.academyId],
+      foreignColumns: [batches.id, batches.academyId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "academy_announcements_created_by_academy_fk",
+      columns: [table.createdBy, table.academyId],
+      foreignColumns: [users.id, users.academyId],
+    }).onDelete("restrict"),
+  ],
+);
+
+export const announcementReads = pgTable(
+  "announcement_reads",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    academyId: uuid("academy_id")
+      .notNull()
+      .references(() => academies.id, { onDelete: "restrict" }),
+    announcementId: uuid("announcement_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    readAt: timestamp("read_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("announcement_reads_announcement_user_uq").on(table.announcementId, table.userId),
+    index("announcement_reads_academy_announcement_idx").on(table.academyId, table.announcementId),
+    foreignKey({
+      name: "announcement_reads_announcement_academy_fk",
+      columns: [table.announcementId, table.academyId],
+      foreignColumns: [academyAnnouncements.id, academyAnnouncements.academyId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "announcement_reads_user_academy_fk",
+      columns: [table.userId, table.academyId],
+      foreignColumns: [users.id, users.academyId],
+    }).onDelete("restrict"),
+  ],
+);
+
 export const batchSchedules = pgTable(
   "batch_schedules",
   {
@@ -454,6 +748,7 @@ export const batchSchedules = pgTable(
       .notNull()
       .references(() => academies.id, { onDelete: "restrict" }),
     batchId: uuid("batch_id").notNull(),
+    branchId: uuid("branch_id"),
     dayOfWeek: integer("day_of_week").notNull(),
     startTime: varchar("start_time", { length: 5 }).notNull(),
     endTime: varchar("end_time", { length: 5 }).notNull(),
@@ -472,6 +767,11 @@ export const batchSchedules = pgTable(
       name: "batch_schedules_batch_academy_fk",
       columns: [table.batchId, table.academyId],
       foreignColumns: [batches.id, batches.academyId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "batch_schedules_branch_academy_fk",
+      columns: [table.branchId, table.academyId],
+      foreignColumns: [academyBranches.id, academyBranches.academyId],
     }).onDelete("restrict"),
     foreignKey({
       name: "batch_schedules_created_by_academy_fk",

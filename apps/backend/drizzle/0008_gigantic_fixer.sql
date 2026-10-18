@@ -1,0 +1,3 @@
+CREATE TYPE "public"."announcement_audience" AS ENUM('everyone', 'parents', 'coaches');--> statement-breakpoint
+ALTER TABLE "academy_announcements" ADD COLUMN "audience" "announcement_audience" DEFAULT 'parents' NOT NULL;--> statement-breakpoint
+ALTER TABLE "academy_announcements" ADD CONSTRAINT "academy_announcements_everyone_batch_chk" CHECK ("academy_announcements"."audience" <> 'everyone' OR "academy_announcements"."batch_id" IS NULL);

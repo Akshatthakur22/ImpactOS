@@ -1,8 +1,15 @@
-import { and, asc, count, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
+import type {
+  CreateAcademyBranchRequest,
+  UpdateAcademyBranchRequest,
+  UpdateCoachRequest,
+} from "@sportdesk/contracts";
 import type { Database } from "./client.js";
 import {
+  academyBranches,
   attendanceCorrections,
   attendanceRecords,
+  authSessions,
   batchCoaches,
   batchSchedules,
   batches,
@@ -32,6 +39,62 @@ type AcademyContext = { academyId: string; createdBy: string };
 
 export function createOperationsRepository(db: Database) {
   return {
+    async listBranches(academyId: string) {
+      return db
+        .select({
+          id: academyBranches.id,
+          name: academyBranches.name,
+          address: academyBranches.address,
+          isActive: academyBranches.isActive,
+        })
+        .from(academyBranches)
+        .where(eq(academyBranches.academyId, academyId))
+        .orderBy(asc(academyBranches.isActive), asc(academyBranches.name));
+    },
+
+    async createBranch(input: CreateAcademyBranchRequest & AcademyContext) {
+      const [branch] = await db
+        .insert(academyBranches)
+        .values({
+          academyId: input.academyId,
+          createdBy: input.createdBy,
+          name: input.name,
+          address: input.address || null,
+        })
+        .returning({
+          id: academyBranches.id,
+          name: academyBranches.name,
+          address: academyBranches.address,
+          isActive: academyBranches.isActive,
+        });
+      if (!branch) throw new Error("Branch insert returned no record.");
+      return branch;
+    },
+
+    async updateBranch(input: {
+      academyId: string;
+      branchId: string;
+      changes: UpdateAcademyBranchRequest;
+    }) {
+      const [branch] = await db
+        .update(academyBranches)
+        .set({ ...input.changes, updatedAt: new Date() })
+        .where(
+          and(
+            eq(academyBranches.id, input.branchId),
+            eq(academyBranches.academyId, input.academyId),
+          ),
+        )
+        .returning({
+          id: academyBranches.id,
+          name: academyBranches.name,
+          address: academyBranches.address,
+          isActive: academyBranches.isActive,
+        });
+      if (!branch) throw new OperationsRepositoryError("RELATED_RECORD_NOT_FOUND");
+      return branch;
+    },
+
     async createCoach(
       input: AcademyContext & {
         displayName: string;
@@ -106,6 +169,66 @@ export function createOperationsRepository(db: Database) {
       return [...coaches.values()].map(({ batchId: _batchId, ...coach }) => coach);
     },
 
+    async updateCoach(input: { academyId: string; coachId: string; changes: UpdateCoachRequest }) {
+      return db.transaction(async (tx) => {
+        const [coach] = await tx
+          .select({ id: coachProfiles.id, userId: coachProfiles.userId })
+          .from(coachProfiles)
+          .innerJoin(users, eq(coachProfiles.userId, users.id))
+          .where(
+            and(
+              eq(coachProfiles.id, input.coachId),
+              eq(coachProfiles.academyId, input.academyId),
+              eq(users.academyId, input.academyId),
+              eq(users.role, "coach"),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!coach) throw new OperationsRepositoryError("COACH_NOT_FOUND");
+
+        const { displayName, status, ...profileChanges } = input.changes;
+        if (Object.keys(profileChanges).length > 0 || status !== undefined) {
+          await tx
+            .update(coachProfiles)
+            .set({
+              ...profileChanges,
+              ...(status !== undefined ? { status } : {}),
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(coachProfiles.id, input.coachId),
+                eq(coachProfiles.academyId, input.academyId),
+              ),
+            );
+        }
+        if (displayName !== undefined || status !== undefined) {
+          await tx
+            .update(users)
+            .set({
+              ...(displayName !== undefined ? { displayName } : {}),
+              ...(status !== undefined ? { isActive: status === "active" } : {}),
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(users.id, coach.userId),
+                eq(users.academyId, input.academyId),
+                eq(users.role, "coach"),
+              ),
+            );
+        }
+        if (status === "inactive") {
+          await tx
+            .update(authSessions)
+            .set({ revokedAt: new Date() })
+            .where(and(eq(authSessions.userId, coach.userId), isNull(authSessions.revokedAt)));
+        }
+        return { updated: true };
+      });
+    },
+
     async assignCoach(input: AcademyContext & { batchId: string; coachId: string }) {
       const [coach] = await db
         .select({ id: coachProfiles.id })
@@ -166,6 +289,8 @@ export function createOperationsRepository(db: Database) {
           id: batchSchedules.id,
           batchId: batches.id,
           batchName: batches.name,
+          branchId: batchSchedules.branchId,
+          branchName: academyBranches.name,
           dayOfWeek: batchSchedules.dayOfWeek,
           startTime: batchSchedules.startTime,
           endTime: batchSchedules.endTime,
@@ -174,6 +299,13 @@ export function createOperationsRepository(db: Database) {
         })
         .from(batchSchedules)
         .innerJoin(batches, eq(batchSchedules.batchId, batches.id))
+        .leftJoin(
+          academyBranches,
+          and(
+            eq(batchSchedules.branchId, academyBranches.id),
+            eq(batchSchedules.academyId, academyBranches.academyId),
+          ),
+        )
         .where(eq(batchSchedules.academyId, academyId))
         .orderBy(asc(batchSchedules.dayOfWeek), asc(batchSchedules.startTime));
     },
@@ -315,6 +447,7 @@ export function createOperationsRepository(db: Database) {
         startTime: string;
         endTime: string;
         venue?: string;
+        branchId?: string | null;
       },
     ) {
       const [batch] = await db
@@ -329,9 +462,24 @@ export function createOperationsRepository(db: Database) {
         )
         .limit(1);
       if (!batch) throw new OperationsRepositoryError("RELATED_RECORD_NOT_FOUND");
+      if (input.branchId) {
+        const [branch] = await db
+          .select({ id: academyBranches.id })
+          .from(academyBranches)
+          .where(
+            and(
+              eq(academyBranches.id, input.branchId),
+              eq(academyBranches.academyId, input.academyId),
+              eq(academyBranches.isActive, true),
+            ),
+          )
+          .limit(1);
+        if (!branch) throw new OperationsRepositoryError("RELATED_RECORD_NOT_FOUND");
+      }
       const [schedule] = await db.insert(batchSchedules).values(input).returning({
         id: batchSchedules.id,
         batchId: batchSchedules.batchId,
+        branchId: batchSchedules.branchId,
         dayOfWeek: batchSchedules.dayOfWeek,
         startTime: batchSchedules.startTime,
         endTime: batchSchedules.endTime,
@@ -339,8 +487,21 @@ export function createOperationsRepository(db: Database) {
         isActive: batchSchedules.isActive,
       });
       if (!schedule) throw new Error("Schedule insert returned no record.");
+      const [branch] = schedule.branchId
+        ? await db
+            .select({ name: academyBranches.name })
+            .from(academyBranches)
+            .where(
+              and(
+                eq(academyBranches.id, schedule.branchId),
+                eq(academyBranches.academyId, input.academyId),
+              ),
+            )
+            .limit(1)
+        : [];
       return {
         ...schedule,
+        branchName: branch?.name ?? null,
         batchName:
           (
             await db
@@ -360,8 +521,18 @@ export function createOperationsRepository(db: Database) {
           id: batchSchedules.id,
           batchId: batchSchedules.batchId,
           venue: batchSchedules.venue,
+          branchId: batchSchedules.branchId,
+          branchName: academyBranches.name,
+          branchIsActive: academyBranches.isActive,
         })
         .from(batchSchedules)
+        .leftJoin(
+          academyBranches,
+          and(
+            eq(batchSchedules.branchId, academyBranches.id),
+            eq(batchSchedules.academyId, academyBranches.academyId),
+          ),
+        )
         .where(
           and(
             eq(batchSchedules.id, input.scheduleId),
@@ -371,6 +542,9 @@ export function createOperationsRepository(db: Database) {
         )
         .limit(1);
       if (!schedule) throw new OperationsRepositoryError("RELATED_RECORD_NOT_FOUND");
+      if (schedule.branchId && !schedule.branchIsActive) {
+        throw new OperationsRepositoryError("RELATED_RECORD_NOT_FOUND");
+      }
       const [session] = await db
         .insert(trainingSessions)
         .values({
@@ -393,7 +567,7 @@ export function createOperationsRepository(db: Database) {
         .from(batches)
         .where(eq(batches.id, session.batchId))
         .limit(1);
-      return { ...session, batchName: batch?.name ?? "" };
+      return { ...session, batchName: batch?.name ?? "", branchName: schedule.branchName };
     },
 
     async listCoachSessions(academyId: string, userId: string, from: Date, to: Date) {
@@ -405,10 +579,19 @@ export function createOperationsRepository(db: Database) {
           startsAt: trainingSessions.startsAt,
           endsAt: trainingSessions.endsAt,
           venue: trainingSessions.venue,
+          branchName: academyBranches.name,
           status: trainingSessions.status,
         })
         .from(trainingSessions)
         .innerJoin(batches, eq(trainingSessions.batchId, batches.id))
+        .leftJoin(batchSchedules, eq(trainingSessions.scheduleId, batchSchedules.id))
+        .leftJoin(
+          academyBranches,
+          and(
+            eq(batchSchedules.branchId, academyBranches.id),
+            eq(batchSchedules.academyId, academyBranches.academyId),
+          ),
+        )
         .innerJoin(batchCoaches, eq(batchCoaches.batchId, batches.id))
         .innerJoin(coachProfiles, eq(batchCoaches.coachId, coachProfiles.id))
         .where(
@@ -432,10 +615,19 @@ export function createOperationsRepository(db: Database) {
           startsAt: trainingSessions.startsAt,
           endsAt: trainingSessions.endsAt,
           venue: trainingSessions.venue,
+          branchName: academyBranches.name,
           status: trainingSessions.status,
         })
         .from(trainingSessions)
         .innerJoin(batches, eq(trainingSessions.batchId, batches.id))
+        .leftJoin(batchSchedules, eq(trainingSessions.scheduleId, batchSchedules.id))
+        .leftJoin(
+          academyBranches,
+          and(
+            eq(batchSchedules.branchId, academyBranches.id),
+            eq(batchSchedules.academyId, academyBranches.academyId),
+          ),
+        )
         .innerJoin(batchCoaches, eq(batchCoaches.batchId, batches.id))
         .innerJoin(coachProfiles, eq(batchCoaches.coachId, coachProfiles.id))
         .where(

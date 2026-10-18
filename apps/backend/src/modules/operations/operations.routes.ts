@@ -2,11 +2,14 @@ import { Router, type Request } from "express";
 import { z } from "zod";
 import {
   AssignCoachRequestSchema,
+  CreateAcademyBranchRequestSchema,
   CreateCoachRequestSchema,
   CreateScheduleRequestSchema,
   CreateSessionRequestSchema,
   CorrectAttendanceRequestSchema,
   RecordAttendanceRequestSchema,
+  UpdateCoachRequestSchema,
+  UpdateAcademyBranchRequestSchema,
 } from "@sportdesk/contracts";
 import type { SportDeskAuthService } from "../auth/auth.service.js";
 import { AuthError } from "../auth/auth.service.js";
@@ -65,6 +68,33 @@ export function createOperationsRouter(options: {
 }): Router {
   const router = Router();
 
+  router.get("/branches", async (request, response) => {
+    const user = await ownerFromRequest(request, options.auth);
+    response.status(200).json({ data: { branches: await options.operations.listBranches(user.academyId) } });
+  });
+
+  router.post("/branches", async (request, response) => {
+    const user = await ownerFromRequest(request, options.auth);
+    const input = CreateAcademyBranchRequestSchema.parse(request.body);
+    const branch = await options.operations.createBranch({
+      ...input,
+      academyId: user.academyId,
+      createdBy: user.id,
+    });
+    response.status(201).json({ data: branch });
+  });
+
+  router.patch("/branches/:branchId", async (request, response) => {
+    const user = await ownerFromRequest(request, options.auth);
+    const changes = UpdateAcademyBranchRequestSchema.parse(request.body);
+    const branch = await options.operations.updateBranch({
+      academyId: user.academyId,
+      branchId: z.string().uuid().parse(request.params.branchId),
+      changes,
+    });
+    response.status(200).json({ data: branch });
+  });
+
   router.get("/coaches", async (request, response) => {
     const user = await ownerFromRequest(request, options.auth);
     response
@@ -83,12 +113,24 @@ export function createOperationsRouter(options: {
     response.status(201).json({ data: coach });
   });
 
+  router.patch("/coaches/:coachId", async (request, response) => {
+    const user = await ownerFromRequest(request, options.auth);
+    const coachId = z.string().uuid().parse(request.params.coachId);
+    const changes = UpdateCoachRequestSchema.parse(request.body);
+    const result = await options.operations.updateCoach({
+      academyId: user.academyId,
+      coachId,
+      changes,
+    });
+    response.status(200).json({ data: result });
+  });
+
   router.post("/batches/:batchId/coaches", async (request, response) => {
     const user = await ownerFromRequest(request, options.auth);
     const input = AssignCoachRequestSchema.parse(request.body);
     const assignment = await options.operations.assignCoach({
       ...input,
-      batchId: request.params.batchId,
+      batchId: z.string().uuid().parse(request.params.batchId),
       academyId: user.academyId,
       createdBy: user.id,
     });

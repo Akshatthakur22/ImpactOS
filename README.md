@@ -1,6 +1,6 @@
 # SportDesk
 
-SportDesk is a modular academy operations system being rebuilt for Impact Fit Academy. The project is delivered in small, verified slices. Phase 0 established identity and academy records; Phase 1 is building the first daily operations workflow across admin web and coach/parent mobile.
+SportDesk is a modular academy operations system being rebuilt for Impact Fit Academy. The project is delivered in small, verified slices. Phase 0 established identity and academy records; Phase 1's coach, schedule, attendance, and parent-access flows are implemented and are going through pilot acceptance checks before Phase 2 finance work begins.
 
 ## Workspace
 
@@ -51,6 +51,6 @@ Backend integration tests apply the checked-in migrations to an isolated in-memo
 
 Phase 0 provides short-lived access tokens, rotating database-backed refresh sessions, strict environment parsing, owner-only admin access, and the first academy records workflow. Owners can configure disciplines, programs, and batches; register students; add a guardian contact; and assign a student to a batch. Student creation, guardian linking, and an initial enrollment are atomic. Academy scope comes from the authenticated user.
 
-Phase 1 now includes coach accounts and batch assignments, recurring schedule records, date-specific sessions, coach mobile attendance entry, owner attendance review and audited corrections, expiring parent access invites, and parent mobile views limited to linked children. Phase 1 is still subject to client smoke checks and operational hardening; see [the product roadmap](docs/product-roadmap.md) for the remaining completion gates and later phases.
+Phase 1 includes coach accounts and batch assignments, recurring schedule records, date-specific sessions, coach mobile attendance entry, owner attendance review and audited corrections, expiring parent access invites, and parent mobile views limited to linked children. The feature code and backend integration tests are in place; physical-device workflow checks and broader browser E2E coverage remain before calling it pilot-ready. See [the product roadmap](docs/product-roadmap.md) for the closeout gates and Phase 2 plan.
 
 The implementation intentionally keeps the product focused on one configured academy. Staff permission administration, automated session generation, fees, payments, athlete progress, announcements, reports, account recovery, and production deployment are not part of the current Phase 1 slice. The dashboard shows no fabricated operational metrics.

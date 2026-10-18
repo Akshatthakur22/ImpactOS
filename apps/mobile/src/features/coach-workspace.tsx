@@ -2,10 +2,12 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import {
   AttendanceStatusSchema,
+  ParentAnnouncementListSchema,
   SessionRosterSchema,
   TrainingSessionSchema,
   type AttendanceStatus,
   type AuthData,
+  type ParentAnnouncement,
   type SessionRoster,
   type TrainingSession,
 } from "@sportdesk/contracts";
@@ -33,6 +35,9 @@ export function CoachWorkspace({
   const [selected, setSelected] = useState<TrainingSession | null>(null);
   const [roster, setRoster] = useState<SessionRoster | null>(null);
   const [attendance, setAttendance] = useState<Record<string, AttendanceStatus>>({});
+  const [announcements, setAnnouncements] = useState<ParentAnnouncement[]>([]);
+  const [announcementsLoading, setAnnouncementsLoading] = useState(true);
+  const [announcementError, setAnnouncementError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,6 +61,54 @@ export function CoachWorkspace({
       )
       .finally(() => setLoading(false));
   }, [loadSessions]);
+
+  useEffect(() => {
+    let active = true;
+    requestMobileData(
+      "/coach/announcements",
+      (value) => ParentAnnouncementListSchema.parse(value),
+      auth,
+      onAuthUpdate,
+    )
+      .then((result) => {
+        if (active) setAnnouncements(result.announcements);
+      })
+      .catch((caught: unknown) => {
+        if (active)
+          setAnnouncementError(
+            caught instanceof Error ? caught.message : "Could not load academy notices.",
+          );
+      })
+      .finally(() => {
+        if (active) setAnnouncementsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [auth, onAuthUpdate]);
+
+  async function markAnnouncementRead(announcementId: string) {
+    try {
+      await requestMobileData(
+        `/coach/announcements/${announcementId}/read`,
+        (value) => value,
+        auth,
+        onAuthUpdate,
+        { method: "POST" },
+      );
+      setAnnouncements((current) =>
+        current.map((announcement) =>
+          announcement.id === announcementId
+            ? { ...announcement, readAt: new Date().toISOString() }
+            : announcement,
+        ),
+      );
+    } catch (caught) {
+      setAnnouncementError(
+        caught instanceof Error ? caught.message : "Could not mark the notice as read.",
+      );
+    }
+  }
 
   async function openSession(session: TrainingSession) {
     setSelected(session);
@@ -137,6 +190,45 @@ export function CoachWorkspace({
         <Text accessibilityRole="alert" style={styles.notice}>
           {notice}
         </Text>
+      ) : null}
+      {!selected ? (
+        <View style={styles.card}>
+          <Text style={styles.cardEyebrow}>ACADEMY UPDATES</Text>
+          <Text style={styles.cardTitle}>Notices</Text>
+          {announcementError ? (
+            <Text accessibilityRole="alert" style={styles.error}>{announcementError}</Text>
+          ) : null}
+          {announcementsLoading ? (
+            <ActivityIndicator style={styles.spinner} color="#176e67" />
+          ) : announcements.length ? (
+            announcements.map((announcement) => (
+              <View key={announcement.id} style={styles.announcementRow}>
+                <View style={styles.announcementHeading}>
+                  <Text style={styles.studentName}>{announcement.title}</Text>
+                  <Text style={announcement.readAt ? styles.readLabel : styles.unreadLabel}>
+                    {announcement.readAt ? "READ" : "NEW"}
+                  </Text>
+                </View>
+                <Text style={styles.announcementMeta}>
+                  {announcement.batchName ? `${announcement.batchName} · ` : "Academy · "}
+                  {new Date(announcement.publishedAt).toLocaleDateString()}
+                </Text>
+                <Text style={styles.announcementBody}>{announcement.body}</Text>
+                {!announcement.readAt ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => void markAnnouncementRead(announcement.id)}
+                    style={styles.readButton}
+                  >
+                    <Text style={styles.readButtonText}>Mark as read</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ))
+          ) : (
+            <Text style={styles.empty}>No academy notices right now.</Text>
+          )}
+        </View>
       ) : null}
       {selected && roster ? (
         <View style={styles.card}>
@@ -227,7 +319,7 @@ export function CoachWorkspace({
                 <View style={styles.sessionInfo}>
                   <Text style={styles.studentName}>{session.batchName}</Text>
                   <Text style={styles.cardBody}>
-                    {formatSessionTime(session)} · {session.venue ?? "Venue not set"}
+                    {formatSessionTime(session)} · {session.branchName ? `${session.branchName} · ` : ""}{session.venue ?? "Venue not set"}
                   </Text>
                   <Text style={styles.sessionStatus}>
                     {session.status === "scheduled"
@@ -372,6 +464,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
   },
+  announcementRow: { borderTopWidth: 1, borderTopColor: "#edf0f1", paddingVertical: 13 },
+  announcementHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  announcementMeta: { marginTop: 5, color: "#87939c", fontSize: 10 },
+  announcementBody: { marginTop: 8, color: "#53616b", fontSize: 12, lineHeight: 19 },
+  unreadLabel: { color: "#176e67", fontSize: 9, fontWeight: "800" },
+  readLabel: { color: "#87939c", fontSize: 9, fontWeight: "800" },
+  readButton: { alignSelf: "flex-start", marginTop: 10, paddingVertical: 5 },
+  readButtonText: { color: "#176e67", fontSize: 11, fontWeight: "700" },
   back: { marginBottom: 18, color: "#176e67", fontSize: 13, fontWeight: "700" },
   roster: { marginTop: 10 },
   studentRow: { borderTopWidth: 1, borderTopColor: "#edf0f1", paddingVertical: 13 },

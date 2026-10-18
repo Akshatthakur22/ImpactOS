@@ -1,9 +1,12 @@
 import type {
+  CreateAcademyBranchRequest,
   CreateCoachRequest,
   CreateScheduleRequest,
   CreateSessionRequest,
   CorrectAttendanceRequest,
   RecordAttendanceRequest,
+  UpdateCoachRequest,
+  UpdateAcademyBranchRequest,
 } from "@sportdesk/contracts";
 import {
   OperationsRepositoryError,
@@ -77,6 +80,30 @@ function isoDate(value: Date) {
 
 export function createOperationsService(repository: OperationsRepository) {
   return {
+    async listBranches(academyId: string) {
+      return repository.listBranches(academyId);
+    },
+
+    async createBranch(input: CreateAcademyBranchRequest & { academyId: string; createdBy: string }) {
+      try {
+        return await repository.createBranch(input);
+      } catch (error) {
+        translateError(error);
+      }
+    },
+
+    async updateBranch(input: {
+      academyId: string;
+      branchId: string;
+      changes: UpdateAcademyBranchRequest;
+    }) {
+      try {
+        return await repository.updateBranch(input);
+      } catch (error) {
+        translateError(error);
+      }
+    },
+
     async createCoach(input: CreateCoachRequest & { academyId: string; createdBy: string }) {
       try {
         const passwordHash = await passwordHasher.hash(input.password);
@@ -97,6 +124,14 @@ export function createOperationsService(repository: OperationsRepository) {
 
     async listCoaches(academyId: string) {
       return repository.listCoaches(academyId);
+    },
+
+    async updateCoach(input: { academyId: string; coachId: string; changes: UpdateCoachRequest }) {
+      try {
+        return await repository.updateCoach(input);
+      } catch (error) {
+        translateError(error);
+      }
     },
 
     async assignCoach(input: {
@@ -154,6 +189,7 @@ export function createOperationsService(repository: OperationsRepository) {
           academyId: input.academyId,
           createdBy: input.createdBy,
           batchId: input.batchId,
+          branchId: input.branchId ?? null,
           dayOfWeek: input.dayOfWeek,
           startTime: input.startTime,
           endTime: input.endTime,

@@ -61,6 +61,14 @@ function hashInvite(token: string) {
 
 export function createParentsService(repository: ParentRepository) {
   return {
+    async revokeGuardianInvite(input: { academyId: string; guardianId: string }) {
+      try {
+        return await repository.revokeInvite({ ...input, now: new Date() });
+      } catch (error) {
+        translateError(error);
+      }
+    },
+
     async createGuardianInvite(input: {
       academyId: string;
       guardianId: string;

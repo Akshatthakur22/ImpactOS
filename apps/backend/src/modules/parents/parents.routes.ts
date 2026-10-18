@@ -37,6 +37,17 @@ export function createParentsRouter(options: {
     response.status(201).json({ data: invite });
   });
 
+  router.delete("/guardians/:guardianId/invites", async (request, response) => {
+    const user = await authenticatedUser(request, options.auth);
+    if (user.role !== "owner")
+      throw new AuthError(403, "FORBIDDEN", "Owner access is required for this operation.");
+    const result = await options.parents.revokeGuardianInvite({
+      academyId: user.academyId,
+      guardianId: z.string().uuid().parse(request.params.guardianId),
+    });
+    response.status(200).json({ data: result });
+  });
+
   router.get("/parent/me/students", async (request, response) => {
     const user = await authenticatedUser(request, options.auth);
     if (user.role !== "parent")

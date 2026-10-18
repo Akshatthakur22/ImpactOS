@@ -6,6 +6,14 @@ import {
   CreateEnrollmentRequestSchema,
   CreateProgramRequestSchema,
   CreateStudentRequestSchema,
+  UpdateAcademySettingsRequestSchema,
+  UpdateBatchRequestSchema,
+  UpdateDisciplineRequestSchema,
+  UpdateProgramRequestSchema,
+  StudentDirectoryQuerySchema,
+  UpdateEnrollmentStatusRequestSchema,
+  UpdateStudentGuardianRequestSchema,
+  UpdateStudentRequestSchema,
 } from "@sportdesk/contracts";
 import type { SportDeskAuthService } from "../auth/auth.service.js";
 import { AuthError } from "../auth/auth.service.js";
@@ -28,6 +36,19 @@ export function createAcademyRouter(options: {
 }): Router {
   const router = Router();
 
+  router.get("/academy/settings", async (request, response) => {
+    const user = await ownerFromRequest(request, options.auth);
+    response.status(200).json({ data: await options.academy.getSettings(user.academyId) });
+  });
+
+  router.patch("/academy/settings", async (request, response) => {
+    const user = await ownerFromRequest(request, options.auth);
+    const changes = UpdateAcademySettingsRequestSchema.parse(request.body);
+    response.status(200).json({
+      data: await options.academy.updateSettings(user.academyId, changes),
+    });
+  });
+
   router.get("/academy/catalog", async (request, response) => {
     const user = await ownerFromRequest(request, options.auth);
     response.status(200).json({ data: await options.academy.getCatalog(user.academyId) });
@@ -44,6 +65,18 @@ export function createAcademyRouter(options: {
     response.status(201).json({ data: record });
   });
 
+  router.patch("/disciplines/:disciplineId", async (request, response) => {
+    const user = await ownerFromRequest(request, options.auth);
+    const disciplineId = z.string().uuid().parse(request.params.disciplineId);
+    const changes = UpdateDisciplineRequestSchema.parse(request.body);
+    const result = await options.academy.updateDiscipline({
+      academyId: user.academyId,
+      disciplineId,
+      changes,
+    });
+    response.status(200).json({ data: result });
+  });
+
   router.post("/programs", async (request, response) => {
     const user = await ownerFromRequest(request, options.auth);
     const input = CreateProgramRequestSchema.parse(request.body);
@@ -53,6 +86,18 @@ export function createAcademyRouter(options: {
       createdBy: user.id,
     });
     response.status(201).json({ data: record });
+  });
+
+  router.patch("/programs/:programId", async (request, response) => {
+    const user = await ownerFromRequest(request, options.auth);
+    const programId = z.string().uuid().parse(request.params.programId);
+    const changes = UpdateProgramRequestSchema.parse(request.body);
+    const result = await options.academy.updateProgram({
+      academyId: user.academyId,
+      programId,
+      changes,
+    });
+    response.status(200).json({ data: result });
   });
 
   router.post("/batches", async (request, response) => {
@@ -66,11 +111,22 @@ export function createAcademyRouter(options: {
     response.status(201).json({ data: record });
   });
 
+  router.patch("/batches/:batchId", async (request, response) => {
+    const user = await ownerFromRequest(request, options.auth);
+    const batchId = z.string().uuid().parse(request.params.batchId);
+    const changes = UpdateBatchRequestSchema.parse(request.body);
+    const result = await options.academy.updateBatch({
+      academyId: user.academyId,
+      batchId,
+      changes,
+    });
+    response.status(200).json({ data: result });
+  });
+
   router.get("/students", async (request, response) => {
     const user = await ownerFromRequest(request, options.auth);
-    response
-      .status(200)
-      .json({ data: { students: await options.academy.listStudents(user.academyId) } });
+    const query = StudentDirectoryQuerySchema.parse(request.query);
+    response.status(200).json({ data: await options.academy.listStudents(user.academyId, query) });
   });
 
   router.post("/students", async (request, response) => {
@@ -95,6 +151,46 @@ export function createAcademyRouter(options: {
       studentId,
     });
     response.status(201).json({ data: record });
+  });
+
+  router.patch("/students/:studentId", async (request, response) => {
+    const user = await ownerFromRequest(request, options.auth);
+    const studentId = z.string().uuid().parse(request.params.studentId);
+    const changes = UpdateStudentRequestSchema.parse(request.body);
+    const result = await options.academy.updateStudent({
+      academyId: user.academyId,
+      studentId,
+      changes,
+    });
+    response.status(200).json({ data: result });
+  });
+
+  router.patch("/students/:studentId/guardians/:guardianId", async (request, response) => {
+    const user = await ownerFromRequest(request, options.auth);
+    const studentId = z.string().uuid().parse(request.params.studentId);
+    const guardianId = z.string().uuid().parse(request.params.guardianId);
+    const changes = UpdateStudentGuardianRequestSchema.parse(request.body);
+    const result = await options.academy.updateStudentGuardian({
+      academyId: user.academyId,
+      studentId,
+      guardianId,
+      changes,
+    });
+    response.status(200).json({ data: result });
+  });
+
+  router.patch("/students/:studentId/enrollments/:enrollmentId", async (request, response) => {
+    const user = await ownerFromRequest(request, options.auth);
+    const studentId = z.string().uuid().parse(request.params.studentId);
+    const enrollmentId = z.string().uuid().parse(request.params.enrollmentId);
+    const { status } = UpdateEnrollmentStatusRequestSchema.parse(request.body);
+    const result = await options.academy.updateEnrollmentStatus({
+      academyId: user.academyId,
+      studentId,
+      enrollmentId,
+      status,
+    });
+    response.status(200).json({ data: result });
   });
 
   return router;

@@ -16,12 +16,23 @@ import {
 } from "./modules/operations/operations.service.js";
 import { createParentsRouter } from "./modules/parents/parents.routes.js";
 import { ParentError, type SportDeskParentsService } from "./modules/parents/parents.service.js";
+import type { SportDeskDashboardService } from "./modules/dashboard/dashboard.service.js";
+import { createFinanceRouter } from "./modules/finance/finance.routes.js";
+import { FinanceError, type SportDeskFinanceService } from "./modules/finance/finance.service.js";
+import { createAnnouncementsRouter } from "./modules/announcements/announcements.routes.js";
+import {
+  AnnouncementError,
+  type SportDeskAnnouncementsService,
+} from "./modules/announcements/announcements.service.js";
 
 export type AppOptions = {
   auth: SportDeskAuthService;
   academy?: SportDeskAcademyService;
   operations?: SportDeskOperationsService;
   parents?: SportDeskParentsService;
+  dashboard?: SportDeskDashboardService;
+  finance?: SportDeskFinanceService;
+  announcements?: SportDeskAnnouncementsService;
   webOrigin: string;
   secureCookies: boolean;
   sessionTtlDays: number;
@@ -37,7 +48,7 @@ export function createApp(options: AppOptions): Express {
     cors({
       origin: options.webOrigin,
       credentials: true,
-      methods: ["GET", "POST", "PUT", "PATCH", "OPTIONS"],
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       allowedHeaders: ["Content-Type", "Authorization"],
       maxAge: 600,
     }),
@@ -89,12 +100,9 @@ export function createApp(options: AppOptions): Express {
     if (user.role !== "owner") {
       throw new AuthError(403, "FORBIDDEN", "Owner access is required for this view.");
     }
-    response.status(200).json({
-      data: {
-        academyName: user.academyName,
-        user,
-      },
-    });
+    if (!options.dashboard) throw new Error("Admin dashboard service is not configured.");
+    const overview = await options.dashboard.getOverview(user.academyId);
+    response.status(200).json({ data: { ...overview, user } });
   });
 
   if (options.academy) {
@@ -108,6 +116,15 @@ export function createApp(options: AppOptions): Express {
   }
   if (options.parents) {
     app.use("/api/v1", createParentsRouter({ auth: options.auth, parents: options.parents }));
+  }
+  if (options.finance) {
+    app.use("/api/v1", createFinanceRouter({ auth: options.auth, finance: options.finance }));
+  }
+  if (options.announcements) {
+    app.use(
+      "/api/v1",
+      createAnnouncementsRouter({ auth: options.auth, announcements: options.announcements }),
+    );
   }
 
   app.use((_request, response) => {
@@ -151,6 +168,18 @@ export function createApp(options: AppOptions): Express {
       return;
     }
     if (error instanceof ParentError) {
+      response.status(error.status).json({
+        error: { code: error.code, message: error.message, requestId },
+      });
+      return;
+    }
+    if (error instanceof FinanceError) {
+      response.status(error.status).json({
+        error: { code: error.code, message: error.message, requestId },
+      });
+      return;
+    }
+    if (error instanceof AnnouncementError) {
       response.status(error.status).json({
         error: { code: error.code, message: error.message, requestId },
       });

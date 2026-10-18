@@ -1,10 +1,21 @@
-import { and, asc, count, eq, inArray } from "drizzle-orm";
-import type { CreateStudentRequest } from "@sportdesk/contracts";
+import { and, asc, count, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
+import type {
+  CreateStudentRequest,
+  StudentDirectoryQuery,
+  UpdateEnrollmentStatusRequest,
+  UpdateBatchRequest,
+  UpdateDisciplineRequest,
+  UpdateProgramRequest,
+  UpdateStudentGuardianRequest,
+  UpdateStudentRequest,
+} from "@sportdesk/contracts";
 import type { Database } from "./client.js";
 import {
+  academies,
   batches,
   disciplines,
   enrollments,
+  guardianInvites,
   guardians,
   programs,
   studentGuardians,
@@ -12,7 +23,18 @@ import {
 } from "./schema.js";
 
 export class AcademyRepositoryError extends Error {
-  constructor(readonly code: "RELATED_RECORD_NOT_FOUND" | "BATCH_FULL" | "ALREADY_ENROLLED") {
+  constructor(
+    readonly code:
+      | "RELATED_RECORD_NOT_FOUND"
+      | "BATCH_FULL"
+      | "ALREADY_ENROLLED"
+      | "STUDENT_HAS_ACTIVE_ENROLLMENTS"
+      | "STUDENT_NOT_ACTIVE"
+      | "ENROLLMENT_ALREADY_ENDED"
+      | "GUARDIAN_ACCOUNT_EMAIL_LOCKED"
+      | "ACTIVE_CHILD_RECORDS"
+      | "CAPACITY_BELOW_ENROLLMENT",
+  ) {
     super(code);
     this.name = "AcademyRepositoryError";
   }
@@ -22,20 +44,53 @@ type CreateRecordContext = { academyId: string; createdBy: string };
 
 async function addEnrollment(
   tx: Parameters<Parameters<Database["transaction"]>[0]>[0],
-  input: CreateRecordContext & { studentId: string; batchId: string },
+  input: CreateRecordContext & {
+    studentId: string;
+    batchId: string;
+    requireActiveStudent?: boolean;
+  },
 ) {
+  const [target] = await tx
+    .select({ id: batches.id, programId: batches.programId })
+    .from(batches)
+    .where(and(eq(batches.id, input.batchId), eq(batches.academyId, input.academyId)))
+    .limit(1);
+  if (!target) throw new AcademyRepositoryError("RELATED_RECORD_NOT_FOUND");
+
+  const [parent] = await tx
+    .select({ disciplineId: programs.disciplineId })
+    .from(programs)
+    .where(and(eq(programs.id, target.programId), eq(programs.academyId, input.academyId)))
+    .limit(1);
+  if (!parent) throw new AcademyRepositoryError("RELATED_RECORD_NOT_FOUND");
+
+  const [discipline] = await tx
+    .select({ id: disciplines.id, isActive: disciplines.isActive })
+    .from(disciplines)
+    .where(and(eq(disciplines.id, parent.disciplineId), eq(disciplines.academyId, input.academyId)))
+    .for("update")
+    .limit(1);
+  const [program] = await tx
+    .select({ id: programs.id, isActive: programs.isActive })
+    .from(programs)
+    .where(and(eq(programs.id, target.programId), eq(programs.academyId, input.academyId)))
+    .for("update")
+    .limit(1);
   const [batch] = await tx
     .select({ id: batches.id, capacity: batches.capacity, isActive: batches.isActive })
     .from(batches)
     .where(and(eq(batches.id, input.batchId), eq(batches.academyId, input.academyId)))
     .for("update")
     .limit(1);
-  if (!batch?.isActive) throw new AcademyRepositoryError("RELATED_RECORD_NOT_FOUND");
+  if (!discipline?.isActive || !program?.isActive || !batch?.isActive) {
+    throw new AcademyRepositoryError("RELATED_RECORD_NOT_FOUND");
+  }
 
   const [student] = await tx
-    .select({ id: students.id })
+    .select({ id: students.id, status: students.status })
     .from(students)
     .where(and(eq(students.id, input.studentId), eq(students.academyId, input.academyId)))
+    .for("update")
     .limit(1);
   if (!student) throw new AcademyRepositoryError("RELATED_RECORD_NOT_FOUND");
 
@@ -62,6 +117,9 @@ async function addEnrollment(
       throw new AcademyRepositoryError("BATCH_FULL");
     }
   }
+  if (input.requireActiveStudent && student.status !== "active") {
+    throw new AcademyRepositoryError("STUDENT_NOT_ACTIVE");
+  }
 
   await tx.insert(enrollments).values({
     academyId: input.academyId,
@@ -73,6 +131,39 @@ async function addEnrollment(
 
 export function createAcademyRepository(db: Database) {
   return {
+    async getSettings(academyId: string) {
+      const [academy] = await db
+        .select({
+          id: academies.id,
+          name: academies.name,
+          slug: academies.slug,
+          timezone: academies.timezone,
+          currency: academies.currency,
+        })
+        .from(academies)
+        .where(eq(academies.id, academyId))
+        .limit(1);
+      return academy ?? null;
+    },
+
+    async updateSettings(input: {
+      academyId: string;
+      changes: { name: string; timezone: string };
+    }) {
+      const [academy] = await db
+        .update(academies)
+        .set({ ...input.changes, updatedAt: new Date() })
+        .where(eq(academies.id, input.academyId))
+        .returning({
+          id: academies.id,
+          name: academies.name,
+          slug: academies.slug,
+          timezone: academies.timezone,
+          currency: academies.currency,
+        });
+      return academy ?? null;
+    },
+
     async listDisciplines(academyId: string) {
       return db
         .select({ id: disciplines.id, name: disciplines.name, isActive: disciplines.isActive })
@@ -115,6 +206,7 @@ export function createAcademyRepository(db: Database) {
             eq(disciplines.isActive, true),
           ),
         )
+        .for("update")
         .limit(1);
       if (!discipline) throw new AcademyRepositoryError("RELATED_RECORD_NOT_FOUND");
       const [record] = await db.insert(programs).values(input).returning({
@@ -174,6 +266,7 @@ export function createAcademyRepository(db: Database) {
             eq(programs.isActive, true),
           ),
         )
+        .for("update")
         .limit(1);
       if (!program) throw new AcademyRepositoryError("RELATED_RECORD_NOT_FOUND");
       const [record] = await db
@@ -195,7 +288,168 @@ export function createAcademyRepository(db: Database) {
       return record;
     },
 
-    async listStudents(academyId: string, studentId?: string) {
+    async updateDiscipline(input: {
+      academyId: string;
+      disciplineId: string;
+      changes: UpdateDisciplineRequest;
+    }) {
+      return db.transaction(async (tx) => {
+        const [discipline] = await tx
+          .select({ id: disciplines.id })
+          .from(disciplines)
+          .where(
+            and(eq(disciplines.id, input.disciplineId), eq(disciplines.academyId, input.academyId)),
+          )
+          .for("update")
+          .limit(1);
+        if (!discipline) throw new AcademyRepositoryError("RELATED_RECORD_NOT_FOUND");
+        if (input.changes.isActive === false) {
+          const [activeProgram] = await tx
+            .select({ id: programs.id })
+            .from(programs)
+            .where(
+              and(
+                eq(programs.academyId, input.academyId),
+                eq(programs.disciplineId, input.disciplineId),
+                eq(programs.isActive, true),
+              ),
+            )
+            .limit(1);
+          if (activeProgram) throw new AcademyRepositoryError("ACTIVE_CHILD_RECORDS");
+        }
+        const [updated] = await tx
+          .update(disciplines)
+          .set({ ...input.changes, updatedAt: new Date() })
+          .where(
+            and(eq(disciplines.id, input.disciplineId), eq(disciplines.academyId, input.academyId)),
+          )
+          .returning({ id: disciplines.id });
+        if (!updated) throw new AcademyRepositoryError("RELATED_RECORD_NOT_FOUND");
+      });
+    },
+
+    async updateProgram(input: {
+      academyId: string;
+      programId: string;
+      changes: UpdateProgramRequest;
+    }) {
+      return db.transaction(async (tx) => {
+        const [program] = await tx
+          .select({ id: programs.id, disciplineId: programs.disciplineId })
+          .from(programs)
+          .where(and(eq(programs.id, input.programId), eq(programs.academyId, input.academyId)))
+          .for("update")
+          .limit(1);
+        if (!program) throw new AcademyRepositoryError("RELATED_RECORD_NOT_FOUND");
+        if (input.changes.isActive === false) {
+          const [activeBatch] = await tx
+            .select({ id: batches.id })
+            .from(batches)
+            .where(
+              and(
+                eq(batches.academyId, input.academyId),
+                eq(batches.programId, input.programId),
+                eq(batches.isActive, true),
+              ),
+            )
+            .limit(1);
+          if (activeBatch) throw new AcademyRepositoryError("ACTIVE_CHILD_RECORDS");
+        }
+        if (input.changes.isActive === true) {
+          const [discipline] = await tx
+            .select({ id: disciplines.id })
+            .from(disciplines)
+            .where(
+              and(
+                eq(disciplines.id, program.disciplineId),
+                eq(disciplines.academyId, input.academyId),
+                eq(disciplines.isActive, true),
+              ),
+            )
+            .limit(1);
+          if (!discipline) throw new AcademyRepositoryError("RELATED_RECORD_NOT_FOUND");
+        }
+        const [updated] = await tx
+          .update(programs)
+          .set({ ...input.changes, updatedAt: new Date() })
+          .where(and(eq(programs.id, input.programId), eq(programs.academyId, input.academyId)))
+          .returning({ id: programs.id });
+        if (!updated) throw new AcademyRepositoryError("RELATED_RECORD_NOT_FOUND");
+      });
+    },
+
+    async updateBatch(input: { academyId: string; batchId: string; changes: UpdateBatchRequest }) {
+      return db.transaction(async (tx) => {
+        const [batch] = await tx
+          .select({ id: batches.id, programId: batches.programId })
+          .from(batches)
+          .where(and(eq(batches.id, input.batchId), eq(batches.academyId, input.academyId)))
+          .for("update")
+          .limit(1);
+        if (!batch) throw new AcademyRepositoryError("RELATED_RECORD_NOT_FOUND");
+        const [activeEnrollmentCount] = await tx
+          .select({ value: count() })
+          .from(enrollments)
+          .where(
+            and(
+              eq(enrollments.academyId, input.academyId),
+              eq(enrollments.batchId, batch.id),
+              eq(enrollments.status, "active"),
+            ),
+          );
+        const enrolled = activeEnrollmentCount?.value ?? 0;
+        if (
+          input.changes.capacity !== undefined &&
+          input.changes.capacity !== null &&
+          input.changes.capacity < enrolled
+        ) {
+          throw new AcademyRepositoryError("CAPACITY_BELOW_ENROLLMENT");
+        }
+        if (input.changes.isActive === false && enrolled > 0) {
+          throw new AcademyRepositoryError("ACTIVE_CHILD_RECORDS");
+        }
+        if (input.changes.isActive === true) {
+          const [program] = await tx
+            .select({ id: programs.id })
+            .from(programs)
+            .innerJoin(disciplines, eq(programs.disciplineId, disciplines.id))
+            .where(
+              and(
+                eq(programs.id, batch.programId),
+                eq(programs.academyId, input.academyId),
+                eq(programs.isActive, true),
+                eq(disciplines.academyId, input.academyId),
+                eq(disciplines.isActive, true),
+              ),
+            )
+            .limit(1);
+          if (!program) throw new AcademyRepositoryError("RELATED_RECORD_NOT_FOUND");
+        }
+        const [updated] = await tx
+          .update(batches)
+          .set({ ...input.changes, updatedAt: new Date() })
+          .where(and(eq(batches.id, input.batchId), eq(batches.academyId, input.academyId)))
+          .returning({ id: batches.id });
+        if (!updated) throw new AcademyRepositoryError("RELATED_RECORD_NOT_FOUND");
+      });
+    },
+
+    async listStudents(academyId: string, query: StudentDirectoryQuery, studentId?: string) {
+      const filters = [eq(students.academyId, academyId)];
+      if (studentId) filters.push(eq(students.id, studentId));
+      if (query.status) filters.push(eq(students.status, query.status));
+      if (query.search) {
+        const pattern = `%${query.search.replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
+        filters.push(
+          or(
+            ilike(students.firstName, pattern),
+            ilike(students.lastName, pattern),
+            ilike(sql<string>`concat(${students.firstName}, ' ', ${students.lastName})`, pattern),
+          )!,
+        );
+      }
+      const where = and(...filters)!;
+      const [totalRow] = await db.select({ total: count() }).from(students).where(where);
       const studentRows = await db
         .select({
           id: students.id,
@@ -205,14 +459,15 @@ export function createAcademyRepository(db: Database) {
           createdAt: students.createdAt,
         })
         .from(students)
-        .where(
-          studentId
-            ? and(eq(students.academyId, academyId), eq(students.id, studentId))
-            : eq(students.academyId, academyId),
-        )
-        .orderBy(asc(students.lastName), asc(students.firstName));
+        .where(where)
+        .orderBy(asc(students.lastName), asc(students.firstName))
+        .limit(query.limit)
+        .offset(query.offset);
 
-      if (studentRows.length === 0) return [];
+      const total = totalRow?.total ?? 0;
+      if (studentRows.length === 0) {
+        return { students: [], total, offset: query.offset, limit: query.limit };
+      }
       const studentIds = studentRows.map((student) => student.id);
       const [guardianRows, enrollmentRows] = await Promise.all([
         db
@@ -221,6 +476,7 @@ export function createAcademyRepository(db: Database) {
             id: guardians.id,
             name: guardians.name,
             email: guardians.email,
+            phone: guardians.phone,
             userId: guardians.userId,
             relationship: studentGuardians.relationship,
           })
@@ -241,6 +497,8 @@ export function createAcademyRepository(db: Database) {
             batchName: batches.name,
             programName: programs.name,
             status: enrollments.status,
+            startedAt: enrollments.startedAt,
+            endedAt: enrollments.endedAt,
           })
           .from(enrollments)
           .innerJoin(batches, eq(enrollments.batchId, batches.id))
@@ -255,6 +513,43 @@ export function createAcademyRepository(db: Database) {
           ),
       ]);
 
+      const guardianIds = [...new Set(guardianRows.map((guardian) => guardian.id))];
+      const inviteRows = guardianIds.length
+        ? await db
+            .select({
+              guardianId: guardianInvites.guardianId,
+              expiresAt: guardianInvites.expiresAt,
+              redeemedAt: guardianInvites.redeemedAt,
+              revokedAt: guardianInvites.revokedAt,
+            })
+            .from(guardianInvites)
+            .where(
+              and(
+                eq(guardianInvites.academyId, academyId),
+                inArray(guardianInvites.guardianId, guardianIds),
+              ),
+            )
+            .orderBy(desc(guardianInvites.createdAt))
+        : [];
+      const inviteStatusByGuardian = new Map<
+        string,
+        "pending" | "expired" | "revoked" | "redeemed"
+      >();
+      const now = new Date();
+      for (const invite of inviteRows) {
+        if (inviteStatusByGuardian.has(invite.guardianId)) continue;
+        inviteStatusByGuardian.set(
+          invite.guardianId,
+          invite.redeemedAt
+            ? "redeemed"
+            : invite.revokedAt
+              ? "revoked"
+              : invite.expiresAt <= now
+                ? "expired"
+                : "pending",
+        );
+      }
+
       const guardianByStudent = new Map<string, typeof guardianRows>();
       for (const row of guardianRows) {
         const list = guardianByStudent.get(row.studentId) ?? [];
@@ -268,21 +563,204 @@ export function createAcademyRepository(db: Database) {
         enrollmentByStudent.set(row.studentId, list);
       }
 
-      return studentRows.map((student) => ({
+      const mappedStudents = studentRows.map((student) => ({
         ...student,
         guardians: (guardianByStudent.get(student.id) ?? []).map(
-          ({ id, name, email, userId, relationship }) => ({
+          ({ id, name, email, phone, userId, relationship }) => ({
             id,
             name,
             email,
+            phone,
             hasAccount: userId !== null,
+            inviteStatus: userId ? "redeemed" : (inviteStatusByGuardian.get(id) ?? "not_sent"),
             relationship,
           }),
         ),
         enrollments: (enrollmentByStudent.get(student.id) ?? []).map(
-          ({ studentId: _studentId, ...enrollment }) => enrollment,
+          ({ studentId: _studentId, startedAt, endedAt, ...enrollment }) => ({
+            ...enrollment,
+            startedAt: startedAt.toISOString(),
+            endedAt: endedAt?.toISOString() ?? null,
+          }),
         ),
       }));
+      return { students: mappedStudents, total, offset: query.offset, limit: query.limit };
+    },
+
+    async updateStudent(input: {
+      academyId: string;
+      studentId: string;
+      changes: UpdateStudentRequest;
+    }) {
+      return db.transaction(async (tx) => {
+        const [current] = await tx
+          .select({ id: students.id, status: students.status })
+          .from(students)
+          .where(and(eq(students.id, input.studentId), eq(students.academyId, input.academyId)))
+          .for("update")
+          .limit(1);
+        if (!current) throw new AcademyRepositoryError("RELATED_RECORD_NOT_FOUND");
+
+        if (input.changes.status && input.changes.status !== current.status) {
+          const [activeEnrollment] = await tx
+            .select({ id: enrollments.id })
+            .from(enrollments)
+            .where(
+              and(
+                eq(enrollments.academyId, input.academyId),
+                eq(enrollments.studentId, input.studentId),
+                eq(enrollments.status, "active"),
+              ),
+            )
+            .limit(1);
+          if (
+            activeEnrollment &&
+            (input.changes.status === "lead" || input.changes.status === "pending")
+          ) {
+            throw new AcademyRepositoryError("STUDENT_HAS_ACTIVE_ENROLLMENTS");
+          }
+          if (
+            input.changes.status === "suspended" ||
+            input.changes.status === "completed" ||
+            input.changes.status === "withdrawn"
+          ) {
+            await tx
+              .update(enrollments)
+              .set({ status: input.changes.status, endedAt: new Date(), updatedAt: new Date() })
+              .where(
+                and(
+                  eq(enrollments.academyId, input.academyId),
+                  eq(enrollments.studentId, input.studentId),
+                  eq(enrollments.status, "active"),
+                ),
+              );
+          }
+        }
+
+        const [updated] = await tx
+          .update(students)
+          .set({ ...input.changes, updatedAt: new Date() })
+          .where(and(eq(students.id, input.studentId), eq(students.academyId, input.academyId)))
+          .returning({ id: students.id });
+        if (!updated) throw new AcademyRepositoryError("RELATED_RECORD_NOT_FOUND");
+      });
+    },
+
+    async updateStudentGuardian(input: {
+      academyId: string;
+      studentId: string;
+      guardianId: string;
+      changes: UpdateStudentGuardianRequest;
+    }) {
+      await db.transaction(async (tx) => {
+        const [guardian] = await tx
+          .select({ id: guardians.id, email: guardians.email, userId: guardians.userId })
+          .from(guardians)
+          .innerJoin(studentGuardians, eq(studentGuardians.guardianId, guardians.id))
+          .where(
+            and(
+              eq(guardians.id, input.guardianId),
+              eq(guardians.academyId, input.academyId),
+              eq(studentGuardians.academyId, input.academyId),
+              eq(studentGuardians.studentId, input.studentId),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!guardian) throw new AcademyRepositoryError("RELATED_RECORD_NOT_FOUND");
+        if (
+          input.changes.email !== undefined &&
+          guardian.userId &&
+          input.changes.email !== guardian.email
+        ) {
+          throw new AcademyRepositoryError("GUARDIAN_ACCOUNT_EMAIL_LOCKED");
+        }
+
+        const emailChanged =
+          input.changes.email !== undefined && input.changes.email !== guardian.email;
+        if (emailChanged) {
+          await tx
+            .update(guardianInvites)
+            .set({ revokedAt: new Date() })
+            .where(
+              and(
+                eq(guardianInvites.guardianId, guardian.id),
+                isNull(guardianInvites.redeemedAt),
+                isNull(guardianInvites.revokedAt),
+              ),
+            );
+        }
+
+        const { relationship, ...profileChanges } = input.changes;
+        if (Object.keys(profileChanges).length > 0) {
+          await tx
+            .update(guardians)
+            .set({ ...profileChanges, updatedAt: new Date() })
+            .where(and(eq(guardians.id, guardian.id), eq(guardians.academyId, input.academyId)));
+        }
+        if (relationship !== undefined) {
+          await tx
+            .update(studentGuardians)
+            .set({ relationship })
+            .where(
+              and(
+                eq(studentGuardians.studentId, input.studentId),
+                eq(studentGuardians.guardianId, input.guardianId),
+                eq(studentGuardians.academyId, input.academyId),
+              ),
+            );
+        }
+      });
+    },
+
+    async endEnrollment(input: {
+      academyId: string;
+      studentId: string;
+      enrollmentId: string;
+      status: UpdateEnrollmentStatusRequest["status"];
+    }) {
+      const [enrollment] = await db
+        .select({
+          id: enrollments.id,
+          batchId: enrollments.batchId,
+          status: enrollments.status,
+          batchName: batches.name,
+          programName: programs.name,
+          startedAt: enrollments.startedAt,
+          endedAt: enrollments.endedAt,
+        })
+        .from(enrollments)
+        .innerJoin(batches, eq(enrollments.batchId, batches.id))
+        .innerJoin(programs, eq(batches.programId, programs.id))
+        .where(
+          and(
+            eq(enrollments.id, input.enrollmentId),
+            eq(enrollments.studentId, input.studentId),
+            eq(enrollments.academyId, input.academyId),
+            eq(batches.academyId, input.academyId),
+            eq(programs.academyId, input.academyId),
+          ),
+        )
+        .limit(1);
+      if (!enrollment) throw new AcademyRepositoryError("RELATED_RECORD_NOT_FOUND");
+      if (enrollment.status !== "active") {
+        if (enrollment.status === input.status) return enrollment;
+        throw new AcademyRepositoryError("ENROLLMENT_ALREADY_ENDED");
+      }
+      if (input.status === "active") return enrollment;
+      const [updated] = await db
+        .update(enrollments)
+        .set({ status: input.status, endedAt: new Date(), updatedAt: new Date() })
+        .where(
+          and(
+            eq(enrollments.id, enrollment.id),
+            eq(enrollments.academyId, input.academyId),
+            eq(enrollments.status, "active"),
+          ),
+        )
+        .returning({ id: enrollments.id });
+      if (!updated) throw new AcademyRepositoryError("ENROLLMENT_ALREADY_ENDED");
+      return { ...enrollment, status: input.status, endedAt: new Date() };
     },
 
     async createStudent(input: CreateRecordContext & CreateStudentRequest) {
@@ -335,18 +813,21 @@ export function createAcademyRepository(db: Database) {
             createdBy: input.createdBy,
             studentId: student.id,
             batchId: input.batchId,
+            requireActiveStudent: true,
           });
         }
         return student.id;
       });
-      const [student] = await this.listStudents(input.academyId, studentId);
+      const {
+        students: [student],
+      } = await this.listStudents(input.academyId, { offset: 0, limit: 1 }, studentId);
       if (!student) throw new Error("Created student could not be loaded.");
       return student;
     },
 
     async createEnrollment(input: CreateRecordContext & { studentId: string; batchId: string }) {
       const [enrollment] = await db.transaction(async (tx) => {
-        await addEnrollment(tx, input);
+        await addEnrollment(tx, { ...input, requireActiveStudent: true });
         return tx
           .select({
             id: enrollments.id,

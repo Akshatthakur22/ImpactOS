@@ -1,18 +1,27 @@
 import {
+  AcademyBranchListSchema,
+  AcademyBranchSchema,
   ApiErrorSchema,
   AdminAttendanceEntrySchema,
   AttendanceCorrectionEntrySchema,
   CoachSchema,
   CorrectAttendanceRequestSchema,
   GuardianInviteSchema,
+  RevokedInviteSchema,
   ScheduleSchema,
   TrainingSessionSchema,
+  UpdatedRecordSchema,
+  UpdateCoachRequestSchema,
   type CreateCoachRequest,
+  type CreateAcademyBranchRequest,
   type CreateScheduleRequest,
   type CreateSessionRequest,
   type CorrectAttendanceRequest,
   type Coach,
+  type AcademyBranch,
   type Schedule,
+  type UpdateCoachRequest,
+  type UpdateAcademyBranchRequest,
 } from "@sportdesk/contracts";
 import { API_BASE, ApiRequestError } from "@/lib/auth-api";
 
@@ -25,7 +34,7 @@ async function readError(response: Response) {
   } catch {
     // Keep upstream failures safe and predictable for the UI.
   }
-  return "Could not connect to SportDesk. Check that the API is running.";
+  return "Could not reach the academy service. Check that the API is running.";
 }
 
 async function requestData<T>(
@@ -69,6 +78,44 @@ export async function getCoaches(token: string, refresh: RefreshSession) {
   );
 }
 
+export async function getBranches(token: string, refresh: RefreshSession) {
+  return requestData(
+    "/branches",
+    (value: unknown) => AcademyBranchListSchema.parse(value),
+    token,
+    refresh,
+  );
+}
+
+export async function createBranch(
+  token: string,
+  refresh: RefreshSession,
+  input: CreateAcademyBranchRequest,
+) {
+  return requestData(
+    "/branches",
+    (value: unknown) => AcademyBranchSchema.parse(value) as AcademyBranch,
+    token,
+    refresh,
+    body(input),
+  );
+}
+
+export async function updateBranch(
+  token: string,
+  refresh: RefreshSession,
+  branchId: string,
+  input: UpdateAcademyBranchRequest,
+) {
+  return requestData(
+    `/branches/${branchId}`,
+    (value: unknown) => AcademyBranchSchema.parse(value),
+    token,
+    refresh,
+    { method: "PATCH", body: JSON.stringify(input) },
+  );
+}
+
 export async function createCoach(
   token: string,
   refresh: RefreshSession,
@@ -80,6 +127,22 @@ export async function createCoach(
     token,
     refresh,
     body(input),
+  );
+}
+
+export async function updateCoach(
+  token: string,
+  refresh: RefreshSession,
+  coachId: string,
+  input: UpdateCoachRequest,
+) {
+  const value = UpdateCoachRequestSchema.parse(input);
+  return requestData(
+    `/coaches/${coachId}`,
+    (payload: unknown) => UpdatedRecordSchema.parse(payload),
+    token,
+    refresh,
+    { method: "PATCH", body: JSON.stringify(value) },
   );
 }
 
@@ -196,5 +259,19 @@ export async function createGuardianInvite(
     token,
     refresh,
     body({}),
+  );
+}
+
+export async function revokeGuardianInvite(
+  token: string,
+  refresh: RefreshSession,
+  guardianId: string,
+) {
+  return requestData(
+    `/guardians/${guardianId}/invites`,
+    (value: unknown) => RevokedInviteSchema.parse(value),
+    token,
+    refresh,
+    { method: "DELETE" },
   );
 }

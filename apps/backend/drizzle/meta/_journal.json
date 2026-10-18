@@ -36,6 +36,41 @@
       "when": 1792326052372,
       "tag": "0004_guardian_parent_access",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792335422850,
+      "tag": "0005_amusing_excalibur",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792335758476,
+      "tag": "0006_certain_mockingbird",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792337530641,
+      "tag": "0007_admin_workspace_modules",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792339529661,
+      "tag": "0008_gigantic_fixer",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792339731740,
+      "tag": "0009_last_silk_fever",
+      "breakpoints": true
     }
   ]
 }

@@ -6,14 +6,29 @@ import {
   CreateProgramRequestSchema,
   CreateStudentRequestSchema,
   CreatedRecordSchema,
+  StudentDirectoryQuerySchema,
   StudentListSchema,
   StudentSchema,
+  UpdateEnrollmentStatusRequestSchema,
+  UpdateBatchRequestSchema,
+  UpdateDisciplineRequestSchema,
+  UpdateProgramRequestSchema,
+  UpdateStudentGuardianRequestSchema,
+  UpdateStudentRequestSchema,
+  UpdatedRecordSchema,
   type AcademyCatalog,
   type CreateBatchRequest,
   type CreateDisciplineRequest,
   type CreateProgramRequest,
   type CreateStudentRequest,
+  type StudentDirectoryQuery,
   type Student,
+  type UpdateEnrollmentStatusRequest,
+  type UpdateBatchRequest,
+  type UpdateDisciplineRequest,
+  type UpdateProgramRequest,
+  type UpdateStudentGuardianRequest,
+  type UpdateStudentRequest,
 } from "@sportdesk/contracts";
 import { API_BASE, ApiRequestError } from "@/lib/auth-api";
 
@@ -26,7 +41,7 @@ async function errorMessage(response: Response) {
   } catch {
     // Use the stable connection message below for malformed upstream responses.
   }
-  return "Could not connect to SportDesk. Check that the API is running.";
+  return "Could not reach the academy service. Check that the API is running.";
 }
 
 async function requestData<T>(
@@ -70,8 +85,24 @@ export async function getAcademyCatalog(accessToken: string, refresh: RefreshSes
   );
 }
 
-export async function getStudents(accessToken: string, refresh: RefreshSession) {
-  return requestData<{ students: Student[] }>("/students", StudentListSchema, accessToken, refresh);
+export async function getStudents(
+  accessToken: string,
+  refresh: RefreshSession,
+  query: StudentDirectoryQuery = { offset: 0, limit: 25 },
+) {
+  const parsed = StudentDirectoryQuerySchema.parse(query);
+  const params = new URLSearchParams({
+    offset: String(parsed.offset),
+    limit: String(parsed.limit),
+  });
+  if (parsed.search) params.set("search", parsed.search);
+  if (parsed.status) params.set("status", parsed.status);
+  return requestData<{
+    students: Student[];
+    total?: number;
+    offset?: number;
+    limit?: number;
+  }>(`/students?${params.toString()}`, StudentListSchema, accessToken, refresh);
 }
 
 export async function createDiscipline(
@@ -101,6 +132,45 @@ export async function createBatch(
   return requestData("/batches", CreatedRecordSchema, accessToken, refresh, jsonBody(value));
 }
 
+export async function updateDiscipline(
+  accessToken: string,
+  refresh: RefreshSession,
+  disciplineId: string,
+  input: UpdateDisciplineRequest,
+) {
+  const value = UpdateDisciplineRequestSchema.parse(input);
+  return requestData(`/disciplines/${disciplineId}`, UpdatedRecordSchema, accessToken, refresh, {
+    method: "PATCH",
+    body: JSON.stringify(value),
+  });
+}
+
+export async function updateProgram(
+  accessToken: string,
+  refresh: RefreshSession,
+  programId: string,
+  input: UpdateProgramRequest,
+) {
+  const value = UpdateProgramRequestSchema.parse(input);
+  return requestData(`/programs/${programId}`, UpdatedRecordSchema, accessToken, refresh, {
+    method: "PATCH",
+    body: JSON.stringify(value),
+  });
+}
+
+export async function updateBatch(
+  accessToken: string,
+  refresh: RefreshSession,
+  batchId: string,
+  input: UpdateBatchRequest,
+) {
+  const value = UpdateBatchRequestSchema.parse(input);
+  return requestData(`/batches/${batchId}`, UpdatedRecordSchema, accessToken, refresh, {
+    method: "PATCH",
+    body: JSON.stringify(value),
+  });
+}
+
 export async function createStudent(
   accessToken: string,
   refresh: RefreshSession,
@@ -108,4 +178,66 @@ export async function createStudent(
 ) {
   const value = CreateStudentRequestSchema.parse(input);
   return requestData<Student>("/students", StudentSchema, accessToken, refresh, jsonBody(value));
+}
+
+export async function updateStudent(
+  accessToken: string,
+  refresh: RefreshSession,
+  studentId: string,
+  input: UpdateStudentRequest,
+) {
+  const value = UpdateStudentRequestSchema.parse(input);
+  return requestData(`/students/${studentId}`, UpdatedRecordSchema, accessToken, refresh, {
+    method: "PATCH",
+    body: JSON.stringify(value),
+  });
+}
+
+export async function updateStudentGuardian(
+  accessToken: string,
+  refresh: RefreshSession,
+  studentId: string,
+  guardianId: string,
+  input: UpdateStudentGuardianRequest,
+) {
+  const value = UpdateStudentGuardianRequestSchema.parse(input);
+  return requestData(
+    `/students/${studentId}/guardians/${guardianId}`,
+    UpdatedRecordSchema,
+    accessToken,
+    refresh,
+    { method: "PATCH", body: JSON.stringify(value) },
+  );
+}
+
+export async function createEnrollment(
+  accessToken: string,
+  refresh: RefreshSession,
+  studentId: string,
+  batchId: string,
+) {
+  return requestData(
+    `/students/${studentId}/enrollments`,
+    CreatedRecordSchema,
+    accessToken,
+    refresh,
+    jsonBody({ batchId }),
+  );
+}
+
+export async function updateEnrollmentStatus(
+  accessToken: string,
+  refresh: RefreshSession,
+  studentId: string,
+  enrollmentId: string,
+  input: UpdateEnrollmentStatusRequest,
+) {
+  const value = UpdateEnrollmentStatusRequestSchema.parse(input);
+  return requestData(
+    `/students/${studentId}/enrollments/${enrollmentId}`,
+    CreatedRecordSchema,
+    accessToken,
+    refresh,
+    { method: "PATCH", body: JSON.stringify(value) },
+  );
 }
