@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { AdminAttendanceEntry, ProgressEntry } from "@sportdesk/contracts";
 import { calendarDateInTimezone, dateRangeInTimezone } from "@/lib/academy-time";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/layout/page-header";
 import { useAuth } from "@/hooks/use-auth";
 import { getAllAttendance, getProgressEntries } from "@/lib/operations-api";
 import { getAcademySettings } from "@/lib/settings-api";
@@ -143,14 +144,8 @@ export default function PerformancePage() {
   }, [records, students.length]);
 
   return (
-    <section className="mx-auto w-full max-w-6xl px-5 py-8 sm:px-8">
-      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-accent">
-        Athlete insights
-      </p>
-      <h1 className="mt-2 text-3xl font-bold tracking-tight">Performance</h1>
-      <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-        Review training consistency alongside coach recorded sport assessments and notes.
-      </p>
+    <section className="sd-page">
+      <PageHeader eyebrow="Athlete insights" title="Performance" description="Review training consistency alongside coach recorded sport assessments and notes." />
 
       <div className="mt-6 flex flex-wrap items-end gap-3 rounded-2xl border border-line bg-white p-4 shadow-sm">
         <label className="space-y-1 text-xs font-semibold text-muted">

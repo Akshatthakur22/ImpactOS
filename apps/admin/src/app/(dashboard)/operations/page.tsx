@@ -17,7 +17,7 @@ export default async function OperationsPage({
       description="Manage your programs, batches, class timetable, and attendance from one place."
       {...(requestedSection ? { initialTab: requestedSection } : {})}
       tabs={[
-        { id: "programs", label: "Programs & batches", permissions: ["students:read", "academy:manage"], content: <ProgramsPage /> },
+        { id: "programs", label: "Programs & batches", permissions: ["academy:manage", "students:read", "schedules:read"], content: <ProgramsPage /> },
         { id: "branches", label: "Branches", permission: "settings:manage", content: <BranchesPage /> },
         { id: "schedule", label: "Schedule", permission: "schedules:read", content: <SchedulePage /> },
         { id: "attendance", label: "Attendance", permission: "attendance:read", content: <AttendancePage /> },

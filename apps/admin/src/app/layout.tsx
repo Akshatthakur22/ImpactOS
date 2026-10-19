@@ -3,8 +3,8 @@ import "@/styles/globals.css";
 import { AuthProvider } from "@/providers/auth-provider";
 
 export const metadata: Metadata = {
-  title: "Impact Academy | AthletixOS",
-  description: "Academy operations workspace for Impact Academy.",
+  title: "SportDesk | Academy workspace",
+  description: "Academy operations workspace for SportDesk.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

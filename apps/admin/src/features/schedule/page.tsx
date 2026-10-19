@@ -9,6 +9,7 @@ import type {
 } from "@sportdesk/contracts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/layout/page-header";
 import { getAcademyCatalog } from "@/lib/academy-api";
 import { getAcademySettings } from "@/lib/settings-api";
 import {
@@ -37,7 +38,8 @@ function formatAcademyDate(value: string, timezone: string) {
 }
 
 export default function SchedulePage() {
-  const { accessToken, refreshSession } = useAuth();
+  const { accessToken, refreshSession, user } = useAuth();
+  const canManage = user?.role === "owner" || user?.permissions?.includes("schedules:write") === true;
   const [catalog, setCatalog] = useState<AcademyCatalog | null>(null);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [sessions, setSessions] = useState<TrainingSession[]>([]);
@@ -258,14 +260,9 @@ export default function SchedulePage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1200px] px-5 py-8 sm:px-8 sm:py-10">
-      <p className="text-sm font-medium text-accent">Daily operations</p>
-      <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em]">Schedule</h1>
-      <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-        Recurring times, session occurrences and changes use the academy timezone:{" "}
-        <strong className="text-foreground">{timezone}</strong>. Times are interpreted in this zone
-        even when your device is elsewhere.
-      </p>
+    <div className="sd-page">
+      <PageHeader eyebrow="Academy" title="Schedule" description={<>Recurring times, session occurrences and changes use the academy timezone: <strong className="text-foreground">{timezone}</strong>. Times are interpreted in this zone even when your device is elsewhere.</>} />
+      {/* This warning is based on the current branch and schedule records. */}
       {schedules.some((schedule) => schedule.isActive && !schedule.branchId) ||
       branches.some((branch) => branch.isActive && (branch.geofenceLatitude === null || branch.geofenceLongitude === null)) ? (
         <div className="mt-4 rounded-xl border border-[#ead9ae] bg-[#fff9e9] p-4 text-sm leading-6 text-[#755d25]">
@@ -289,7 +286,7 @@ export default function SchedulePage() {
         </div>
       )}
 
-      <div className="mt-8 grid gap-6 lg:grid-cols-2">
+      {canManage ? <div className="mt-8 grid gap-6 lg:grid-cols-2">
         <section className="rounded-2xl border border-line bg-white p-5 sm:p-6">
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted">
             Recurring schedule
@@ -433,7 +430,7 @@ export default function SchedulePage() {
             </Button>
           </form>
         </section>
-      </div>
+      </div> : <p className="mt-5 rounded-2xl border border-[#e5eae6] bg-white px-4 py-3 text-sm text-[#68756f]">You have view access to schedules. Creating and changing sessions requires schedule management access.</p>}
 
       <section className="mt-6 rounded-2xl border border-line bg-white p-5 sm:p-6">
         <h2 className="text-lg font-semibold">Configured schedules</h2>
@@ -454,7 +451,7 @@ export default function SchedulePage() {
                     {schedule.venue ? ` · ${schedule.venue}` : ""}
                   </p>
                 </div>
-                <div className="flex gap-2">
+                {canManage ? <div className="flex gap-2">
                   <Button
                     size="sm"
                     variant="outline"
@@ -478,9 +475,9 @@ export default function SchedulePage() {
                   >
                     {schedule.isActive ? "Deactivate" : "Reactivate"}
                   </Button>
-                </div>
+                </div> : null}
               </div>
-              {editingSchedule === schedule.id && (
+              {canManage && editingSchedule === schedule.id && (
                 <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_1fr_1.2fr_1fr_auto]">
                   <select
                     aria-label="Edit schedule day"
@@ -560,7 +557,7 @@ export default function SchedulePage() {
                     · {session.status}
                   </p>
                 </div>
-                {session.status === "scheduled" && (
+                {canManage && session.status === "scheduled" && (
                   <div className="flex gap-2">
                     <Button
                       size="sm"
@@ -585,7 +582,7 @@ export default function SchedulePage() {
                   </div>
                 )}
               </div>
-              {editingSession === session.id && (
+              {canManage && editingSession === session.id && (
                 <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto_auto]">
                   <Input
                     aria-label="Rescheduled session start"

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import type { AcademyCatalog, Inquiry, InquiryStatus } from "@sportdesk/contracts";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/layout/page-header";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -287,20 +288,11 @@ export default function AdmissionsPage() {
   }
 
   return (
-    <section className="mx-auto w-full max-w-[1440px] px-5 py-8 sm:px-8 sm:py-10">
-      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-accent">People</p>
-      <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-[-0.04em]">Admissions</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-            Track prospective students, record each contact, and convert a successful inquiry into
-            an academy record.
-          </p>
-        </div>
-        <Button onClick={() => setShowCreate((open) => !open)}>
+    <section className="sd-page">
+      <PageHeader eyebrow="People" title="Admissions" description="Track prospective students, record each contact, and convert a successful inquiry into an academy record."
+        actions={<Button onClick={() => setShowCreate((open) => !open)}>
           {showCreate ? "Close form" : "New inquiry"}
-        </Button>
-      </div>
+        </Button>} />
 
       {error ? (
         <div

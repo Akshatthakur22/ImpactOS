@@ -5,13 +5,15 @@ import Link from "next/link";
 import type { AcademyCatalog, Coach } from "@sportdesk/contracts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/layout/page-header";
 import { getAcademyCatalog } from "@/lib/academy-api";
 import { ApiRequestError } from "@/lib/auth-api";
 import { assignCoach, createCoach, getCoaches, updateCoach } from "@/lib/operations-api";
 import { useAuth } from "@/hooks/use-auth";
 
 export default function CoachesPage() {
-  const { accessToken, refreshSession } = useAuth();
+  const { accessToken, refreshSession, user } = useAuth();
+  const canManage = user?.role === "owner" || user?.permissions?.includes("coaches:write") === true;
   const [coaches, setCoaches] = useState<Coach[]>([]);
   const [catalog, setCatalog] = useState<AcademyCatalog | null>(null);
   const [displayName, setDisplayName] = useState("");
@@ -138,12 +140,8 @@ export default function CoachesPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1200px] px-5 py-8 sm:px-8 sm:py-10">
-        <p className="text-sm font-medium text-accent">People and access</p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em]">Coaches & classes</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-          Manage coach profiles and batch assignments. Set class times and review attendance in Academy operations.
-        </p>
+    <div className="sd-page">
+        <PageHeader eyebrow="People" title="Coaches" description="Manage coach profiles and batch assignments. Set class times and review attendance in Academy operations." />
         {error && (
           <div
             role="alert"
@@ -160,7 +158,7 @@ export default function CoachesPage() {
             {notice}
           </div>
         )}
-        <div className="mt-8 grid gap-6 lg:grid-cols-2">
+        {canManage ? <div className="mt-8 grid gap-6 lg:grid-cols-2">
           <section className="rounded-2xl border border-line bg-white p-5 sm:p-6">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted">
               New coach
@@ -284,8 +282,8 @@ export default function CoachesPage() {
               Open class timetable and attendance
             </Link>
           </section>
-        </div>
-        {editingCoachId && (
+        </div> : <section className="mt-6 rounded-2xl border border-[#e5eae6] bg-white p-5 sm:p-6"><h2 className="text-base font-semibold">Coach directory</h2><ul className="mt-3 divide-y divide-[#edf0ed]">{coaches.map((coach) => <li key={coach.id} className="py-3"><p className="text-sm font-medium">{coach.displayName}</p><p className="mt-1 text-xs text-[#748079]">{coach.email} · {coach.status} · {coach.batchIds.length} batches</p>{coach.specializations.length ? <p className="mt-1 text-xs text-[#748079]">{coach.specializations.join(", ")}</p> : null}</li>)}{!loading && coaches.length === 0 ? <li className="py-4 text-sm text-[#748079]">No coaches have been added.</li> : null}</ul></section>}
+        {canManage && editingCoachId && (
           <section className="mt-6 rounded-2xl border border-line bg-white p-5 sm:p-6">
             <h2 className="text-lg font-semibold">Coach profile and access</h2>
             <form

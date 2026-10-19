@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { AcademyCatalog } from "@sportdesk/contracts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/layout/page-header";
 import {
   createBatch,
   createDiscipline,
@@ -23,7 +24,8 @@ type EditableRecord =
   | { kind: "batch"; id: string; name: string; isActive: boolean; capacity: number | null };
 
 export default function ProgramsPage({ focus = "all" }: { focus?: "all" | "batches" }) {
-  const { accessToken, refreshSession } = useAuth();
+  const { accessToken, refreshSession, user } = useAuth();
+  const canManage = user?.role === "owner" || user?.permissions?.includes("academy:manage") === true;
   const [catalog, setCatalog] = useState<AcademyCatalog | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<Action>(null);
@@ -161,19 +163,11 @@ export default function ProgramsPage({ focus = "all" }: { focus?: "all" | "batch
   }
 
   return (
-    <div className="mx-auto max-w-[1200px] px-5 py-8 sm:px-8 sm:py-10">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <p className="text-sm font-medium text-accent">Academy setup</p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em]">Programs & batches</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-              Configure the disciplines, programs, and training groups offered at your academy.
-            </p>
-          </div>
-          <Link href="/students" className="text-sm font-semibold text-accent hover:underline">
+    <div className="sd-page">
+        <PageHeader eyebrow="Academy setup" title="Programs & batches" description="Configure the disciplines, programs, and training groups offered at your academy."
+          actions={<Link href="/students" className="text-sm font-semibold text-accent hover:underline">
             Go to students →
-          </Link>
-        </div>
+          </Link>} />
 
         {error && (
           <div
@@ -205,7 +199,7 @@ export default function ProgramsPage({ focus = "all" }: { focus?: "all" | "batch
                 {catalog?.disciplines.length ?? 0}
               </span>
             </div>
-            <form className="mt-5 space-y-3" onSubmit={(event) => void submit(event, "discipline")}>
+            {canManage ? <form className="mt-5 space-y-3" onSubmit={(event) => void submit(event, "discipline")}>
               <label className="block space-y-2 text-sm font-medium" htmlFor="discipline-name">
                 Discipline name
                 <Input
@@ -220,7 +214,7 @@ export default function ProgramsPage({ focus = "all" }: { focus?: "all" | "batch
               <Button type="submit" disabled={busy !== null || loading}>
                 {busy === "discipline" ? "Saving…" : "Add discipline"}
               </Button>
-            </form>
+            </form> : <p className="mt-4 rounded-xl bg-[#f5f7f5] px-3 py-2.5 text-xs leading-5 text-[#73807a]">You have view access to academy setup.</p>}
             <ul className="mt-6 divide-y divide-line" aria-label="Disciplines">
               {(catalog?.disciplines ?? []).map((discipline) => (
                 <li
@@ -233,7 +227,7 @@ export default function ProgramsPage({ focus = "all" }: { focus?: "all" | "batch
                       {discipline.isActive ? "Active" : "Inactive"}
                     </span>
                   </div>
-                  <Button
+                  {canManage ? <Button
                     type="button"
                     size="sm"
                     variant="outline"
@@ -247,7 +241,7 @@ export default function ProgramsPage({ focus = "all" }: { focus?: "all" | "batch
                     }
                   >
                     Edit
-                  </Button>
+                  </Button> : null}
                 </li>
               ))}
               {!loading && catalog?.disciplines.length === 0 && (
@@ -268,7 +262,7 @@ export default function ProgramsPage({ focus = "all" }: { focus?: "all" | "batch
                 {catalog?.programs.length ?? 0}
               </span>
             </div>
-            <form className="mt-5 space-y-3" onSubmit={(event) => void submit(event, "program")}>
+            {canManage ? <form className="mt-5 space-y-3" onSubmit={(event) => void submit(event, "program")}>
               <label className="block space-y-2 text-sm font-medium" htmlFor="program-name">
                 Program name
                 <Input
@@ -312,7 +306,7 @@ export default function ProgramsPage({ focus = "all" }: { focus?: "all" | "batch
               >
                 {busy === "program" ? "Saving…" : "Add program"}
               </Button>
-            </form>
+            </form> : null}
             <ul className="mt-6 divide-y divide-line" aria-label="Programs">
               {(catalog?.programs ?? []).map((program) => (
                 <li
@@ -326,7 +320,7 @@ export default function ProgramsPage({ focus = "all" }: { focus?: "all" | "batch
                     </span>
                     {!program.isActive && <span className="ml-2 text-xs text-muted">Inactive</span>}
                   </div>
-                  <Button
+                  {canManage ? <Button
                     type="button"
                     size="sm"
                     variant="outline"
@@ -340,7 +334,7 @@ export default function ProgramsPage({ focus = "all" }: { focus?: "all" | "batch
                     }
                   >
                     Edit
-                  </Button>
+                  </Button> : null}
                 </li>
               ))}
               {!loading && catalog?.programs.length === 0 && (
@@ -364,7 +358,7 @@ export default function ProgramsPage({ focus = "all" }: { focus?: "all" | "batch
                 {catalog?.batches.length ?? 0}
               </span>
             </div>
-            <form className="mt-5 space-y-3" onSubmit={(event) => void submit(event, "batch")}>
+            {canManage ? <form className="mt-5 space-y-3" onSubmit={(event) => void submit(event, "batch")}>
               <label className="block space-y-2 text-sm font-medium" htmlFor="batch-name">
                 Batch name
                 <Input
@@ -419,7 +413,7 @@ export default function ProgramsPage({ focus = "all" }: { focus?: "all" | "batch
               >
                 {busy === "batch" ? "Saving…" : "Add batch"}
               </Button>
-            </form>
+            </form> : null}
             <ul className="mt-6 divide-y divide-line" aria-label="Batches">
               {(catalog?.batches ?? []).map((batch) => (
                 <li key={batch.id} className="py-3">
@@ -437,7 +431,7 @@ export default function ProgramsPage({ focus = "all" }: { focus?: "all" | "batch
                     <span className="text-xs text-muted">
                       {batch.isActive ? "Active" : "Inactive"}
                     </span>
-                    <Button
+                    {canManage ? <Button
                       type="button"
                       size="sm"
                       variant="outline"
@@ -452,7 +446,7 @@ export default function ProgramsPage({ focus = "all" }: { focus?: "all" | "batch
                       }
                     >
                       Edit
-                    </Button>
+                    </Button> : null}
                   </div>
                 </li>
               ))}
@@ -462,7 +456,7 @@ export default function ProgramsPage({ focus = "all" }: { focus?: "all" | "batch
             </ul>
           </section>
         </div>
-        {editing && (
+        {canManage && editing && (
           <section className="mt-6 rounded-2xl border border-line bg-white p-5 sm:p-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>

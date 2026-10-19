@@ -220,7 +220,7 @@ test("owner signs in and registers a student into an academy batch", async ({ pa
   expect(await page.evaluate(() => Object.keys(localStorage))).toEqual([]);
   expect(await page.evaluate(() => Object.keys(sessionStorage))).toEqual([]);
 
-  await page.getByRole("link", { name: "Students", exact: true }).click();
+  await page.getByRole("link", { name: "Students & guardians", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Students & guardians" })).toBeVisible();
   await page.getByLabel("First name").fill("Aarav");
   await page.getByLabel("Last name").fill("Mehta");

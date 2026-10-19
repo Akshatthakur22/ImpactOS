@@ -3,19 +3,22 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import type { AdminOverview, AdminOverviewSession } from "@sportdesk/contracts";
+import type { Permission } from "@sportdesk/contracts";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { ApiRequestError, getAdminOverview } from "@/lib/auth-api";
 import { useAuth } from "@/hooks/use-auth";
 
-const shortcuts = [
-  { href: "/students", label: "Register a student", description: "Add a student and guardian" },
-  { href: "/coaches", label: "Manage coaches", description: "Create an account or assign a batch" },
-  { href: "/operations", label: "Create a session", description: "Set up training for a batch" },
-  { href: "/operations", label: "Review attendance", description: "Check records and corrections" },
+const shortcuts: Array<{ href: string; label: string; description: string; permission: Permission }> = [
+  { href: "/students", label: "Register a student", description: "Add a student and guardian", permission: "students:write" },
+  { href: "/coaches", label: "Manage coaches", description: "Create an account or assign a batch", permission: "coaches:write" },
+  { href: "/operations?section=schedule", label: "Create a session", description: "Set up training for a batch", permission: "schedules:write" },
+  { href: "/operations?section=attendance", label: "Review attendance", description: "Check records and corrections", permission: "attendance:read" },
   {
     href: "/finance",
     label: "Manage academy finance",
     description: "Invoices, receipts, and expenses",
+    permission: "payments:read",
   },
 ];
 
@@ -54,31 +57,23 @@ function MetricCard({
   label,
   value,
   detail,
-  tint,
+  href,
 }: {
   label: string;
   value: number;
   detail: string;
-  tint: string;
+  href?: string | undefined;
 }) {
-  return (
-    <article className="rounded-2xl border border-line bg-white p-5 shadow-sm">
-      <div className={`mb-4 h-1 w-10 rounded-full ${tint}`} />
-      <p className="text-3xl font-semibold tracking-[-0.04em] tabular-nums">{value}</p>
-      <h2 className="mt-1 text-sm font-semibold">{label}</h2>
-      <p className="mt-1 text-xs text-muted">{detail}</p>
-    </article>
-  );
+  const content = <>
+      <div className="flex items-center justify-between gap-3"><h2 className="text-[12px] font-medium text-[#73807a]">{label}</h2>{href ? <span className="text-[#a1aaa5] transition-transform group-hover:translate-x-0.5" aria-hidden="true">↗</span> : null}</div>
+      <p className="mt-2 text-[30px] font-semibold leading-none tracking-[-0.045em] tabular-nums text-[#1f2c30]">{value.toLocaleString("en-IN")}</p>
+      <p className="mt-2 text-[11px] leading-4 text-[#89938e]">{detail}</p>
+    </>;
+  const className = `group block rounded-[18px] border border-[#e5eae6] bg-white p-5 ${href ? "transition-colors hover:border-[#b8d0c6] hover:bg-[#fbfdfb] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#176e67]" : ""}`;
+  return href ? <Link href={href} className={className}>{content}</Link> : <article className={className}>{content}</article>;
 }
 
 function SessionCard({ session, timezone }: { session: AdminOverviewSession; timezone: string }) {
-  const statusTone =
-    session.status === "completed"
-      ? "bg-[#e5f3f0] text-[#176e67]"
-      : session.status === "cancelled"
-        ? "bg-[#f7eae7] text-[#984d3f]"
-        : "bg-[#eef2f5] text-[#566673]";
-
   return (
     <article className="grid gap-3 border-b border-line px-5 py-4 last:border-b-0 sm:grid-cols-[88px_minmax(0,1fr)_auto] sm:items-center">
       <div className="text-sm font-semibold tabular-nums">
@@ -102,9 +97,7 @@ function SessionCard({ session, timezone }: { session: AdminOverviewSession; tim
           </p>
         )}
       </div>
-      <span className={`w-fit rounded-full px-2.5 py-1 text-[11px] font-semibold ${statusTone}`}>
-        {sessionStatusLabels[session.status]}
-      </span>
+      <StatusBadge status={session.status} label={sessionStatusLabels[session.status]} />
     </article>
   );
 }
@@ -118,7 +111,7 @@ function OverviewContent() {
 
   const loadOverview = useCallback(
     async (showRefreshState = false) => {
-      if (!accessToken || user?.role !== "owner") return;
+      if (!accessToken || (user?.role !== "owner" && !user?.permissions?.includes("admin:dashboard:read"))) return;
       if (showRefreshState) setRefreshing(true);
       else setLoading(true);
       setError(null);
@@ -140,16 +133,27 @@ function OverviewContent() {
         setRefreshing(false);
       }
     },
-    [accessToken, refreshSession, user?.role],
+    [accessToken, refreshSession, user?.permissions, user?.role],
   );
 
   useEffect(() => {
     void loadOverview();
   }, [loadOverview]);
 
+  if (user && user.role !== "owner" && !user.permissions?.includes("admin:dashboard:read")) {
+    return (
+      <div className="sd-page">
+        <h1 className="sd-page-title">Academy overview</h1>
+        <p role="alert" className="mt-4 max-w-xl rounded-xl border border-[#e5eae6] bg-white p-4 text-sm text-muted">
+          Your staff account does not have permission to view dashboard data. Ask an academy owner to update your access.
+        </p>
+      </div>
+    );
+  }
+
   if (loading && !overview) {
     return (
-      <div className="mx-auto max-w-[1240px] px-5 py-10 sm:px-8">
+      <div className="sd-page">
         <div className="h-8 w-64 animate-pulse rounded-lg bg-[#e6ebee]" />
         <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {Array.from({ length: 4 }, (_, index) => (
@@ -163,9 +167,9 @@ function OverviewContent() {
 
   if (!overview) {
     return (
-      <div className="mx-auto max-w-[1240px] px-5 py-10 sm:px-8">
+      <div className="sd-page">
         <p className="text-sm font-medium text-accent">{user?.academyName ?? "Academy"}</p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em]">Academy overview</h1>
+        <h1 className="sd-page-title mt-2">Academy overview</h1>
         <div role="alert" className="mt-6 rounded-xl border border-[#f1d8d2] bg-[#fff7f5] p-4">
           <p className="text-sm font-semibold text-[#984d3f]">Could not load live academy data</p>
           <p className="mt-1 text-sm text-[#984d3f]">
@@ -180,16 +184,18 @@ function OverviewContent() {
   }
 
   const { metrics } = overview;
+  const can = (permission: Permission) => user?.role === "owner" || user?.permissions?.includes(permission) === true;
+  const accessibleShortcuts = shortcuts.filter((shortcut) => can(shortcut.permission) || (shortcut.href === "/finance" && can("expenses:manage")));
   const attendance = metrics.attendanceToday;
   const attendanceWidth =
     attendance.expected > 0 ? Math.min(100, (attendance.marked / attendance.expected) * 100) : 0;
 
   return (
-    <div className="mx-auto max-w-[1240px] px-5 py-8 sm:px-8 sm:py-10">
+    <div className="sd-page">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-sm font-medium text-accent">{overview.academyName}</p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em] sm:text-[2.15rem]">
+          <h1 className="sd-page-title mt-2">
             Welcome, {user?.displayName.split(" ")[0] ?? "Owner"}
           </h1>
           <p className="mt-2 text-sm text-muted">
@@ -211,48 +217,48 @@ function OverviewContent() {
       )}
 
       <section
-        className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
+        className="mt-7 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
         aria-label="Academy totals"
       >
         <MetricCard
           label="Active students"
           value={metrics.activeStudents}
-          detail="Students with an active batch enrollment"
-          tint="bg-[#176e67]"
+          detail="With an active batch enrollment"
+          href={can("students:read") ? "/students" : undefined}
         />
         <MetricCard
           label="Active coaches"
           value={metrics.activeCoaches}
-          detail="Active coach accounts"
-          tint="bg-[#51879a]"
+          detail="Coach accounts"
+          href={can("coaches:read") ? "/coaches" : undefined}
         />
         <MetricCard
           label="Active batches"
           value={metrics.activeBatches}
           detail={`${metrics.activePrograms} active program${metrics.activePrograms === 1 ? "" : "s"}`}
-          tint="bg-[#8b7aac]"
+          href={can("academy:manage") || can("students:read") ? "/operations?section=programs" : undefined}
         />
         <MetricCard
           label="Sessions today"
           value={metrics.sessionsToday}
           detail={`${metrics.scheduledSessionsToday} scheduled · ${metrics.completedSessionsToday} completed · ${metrics.cancelledSessionsToday} cancelled`}
-          tint="bg-[#d58a46]"
+          href={can("schedules:read") ? "/operations?section=schedule" : undefined}
         />
       </section>
 
-      <section className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.55fr)_minmax(300px,0.8fr)]">
-        <article className="overflow-hidden rounded-2xl border border-line bg-white shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line px-5 py-5">
+      <section className="mt-5 grid items-start gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(300px,0.8fr)]">
+        <article className="overflow-hidden rounded-[18px] border border-[#e5eae6] bg-white">
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#edf0ed] px-5 py-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-accent">
+              <p className="sd-eyebrow">
                 Daily operations
               </p>
               <h2 className="mt-1 text-lg font-semibold">Today’s sessions</h2>
               <p className="mt-1 text-xs text-muted">Times shown in {overview.timezone}</p>
             </div>
-            <Link href="/operations?section=schedule" className="text-sm font-semibold text-accent hover:underline">
+            {can("schedules:read") ? <Link href="/operations?section=schedule" className="text-sm font-semibold text-accent hover:underline">
               Open schedule →
-            </Link>
+            </Link> : null}
           </div>
           {overview.todaySessions.length === 0 ? (
             <div className="px-5 py-10 text-center">
@@ -260,12 +266,12 @@ function OverviewContent() {
               <p className="mt-1 text-xs text-muted">
                 Create a session from an active batch schedule.
               </p>
-              <Link
+              {can("schedules:read") ? <Link
                 href="/operations?section=schedule"
                 className="mt-4 inline-block text-sm font-semibold text-accent hover:underline"
               >
                 Go to schedule
-              </Link>
+              </Link> : null}
             </div>
           ) : (
             overview.todaySessions.map((session) => (
@@ -275,20 +281,20 @@ function OverviewContent() {
         </article>
 
         <div className="space-y-6">
-          <article className="rounded-2xl border border-line bg-white p-5 shadow-sm">
+          <article className="rounded-[18px] border border-[#e5eae6] bg-white p-5">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-accent">
+                <p className="sd-eyebrow">
                   Attendance
                 </p>
                 <h2 className="mt-1 text-lg font-semibold">Today’s check-ins</h2>
               </div>
-              <Link
+              {can("attendance:read") ? <Link
                 href="/operations?section=attendance"
                 className="text-sm font-semibold text-accent hover:underline"
               >
                 Review →
-              </Link>
+              </Link> : null}
             </div>
             <div className="mt-5 flex items-end justify-between gap-3">
               <p className="text-3xl font-semibold tabular-nums">
@@ -341,17 +347,17 @@ function OverviewContent() {
             )}
           </article>
 
-          <article className="rounded-2xl border border-line bg-white p-5 shadow-sm">
+          <article className="rounded-[18px] border border-[#e5eae6] bg-white p-5">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-accent">
+                <p className="sd-eyebrow">
                   Student status
                 </p>
                 <h2 className="mt-1 text-lg font-semibold">Pending students</h2>
               </div>
-              <Link href="/students" className="text-sm font-semibold text-accent hover:underline">
+              {can("students:read") ? <Link href="/students" className="text-sm font-semibold text-accent hover:underline">
                 View students →
-              </Link>
+              </Link> : null}
             </div>
             <p className="mt-4 text-3xl font-semibold tabular-nums">{metrics.pendingStudents}</p>
             <p className="mt-1 text-xs text-muted">
@@ -361,14 +367,14 @@ function OverviewContent() {
         </div>
       </section>
 
-      <section className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
-        <article className="rounded-2xl border border-line bg-white p-5 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-accent">
+      <section className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
+        <article className="rounded-[18px] border border-[#e5eae6] bg-white p-5">
+          <p className="sd-eyebrow">
             Common tasks
           </p>
           <h2 className="mt-1 text-lg font-semibold">Quick actions</h2>
           <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
-            {shortcuts.map((shortcut) => (
+            {accessibleShortcuts.map((shortcut) => (
               <Link
                 key={shortcut.href + shortcut.label}
                 href={shortcut.href}
@@ -383,17 +389,17 @@ function OverviewContent() {
           </div>
         </article>
 
-        <article className="overflow-hidden rounded-2xl border border-line bg-white shadow-sm">
-          <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-5">
+        <article className="overflow-hidden rounded-[18px] border border-[#e5eae6] bg-white">
+          <div className="flex items-start justify-between gap-3 border-b border-[#edf0ed] px-5 py-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-accent">
+              <p className="sd-eyebrow">
                 Latest updates
               </p>
               <h2 className="mt-1 text-lg font-semibold">Recent attendance</h2>
             </div>
-            <Link href="/operations?section=attendance" className="text-sm font-semibold text-accent hover:underline">
+            {can("attendance:read") ? <Link href="/operations?section=attendance" className="text-sm font-semibold text-accent hover:underline">
               All records →
-            </Link>
+            </Link> : null}
           </div>
           {overview.recentAttendance.length === 0 ? (
             <p className="px-5 py-8 text-sm text-muted">

@@ -2,15 +2,19 @@
 
 :root {
   color-scheme: light;
-  --background: #f4f5f7;
-  --foreground: #1b2630;
-  --muted: #63717d;
-  --line: #e1e6ea;
+  --background: #f6f7f5;
+  --foreground: #1b292d;
+  --muted: #68756f;
+  --line: #e5eae6;
   --surface: #ffffff;
   --accent: #176e67;
-  --accent-strong: #115b55;
-  --accent-soft: #e7f1ef;
-  --warning: #b97932;
+  --accent-strong: #115e57;
+  --accent-soft: #eaf3ef;
+  --warning: #a86d2d;
+  --success: #39785f;
+  --danger: #a54b3e;
+  --radius-card: 18px;
+  --shadow-soft: 0 8px 28px rgb(25 44 35 / 4%);
 }
 
 @theme inline {
@@ -20,6 +24,8 @@
   --color-line: var(--line);
   --color-surface: var(--surface);
   --color-accent: var(--accent);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
 }
 
 * {
@@ -29,6 +35,7 @@ html {
   min-width: 320px;
   background: var(--background);
   scroll-behavior: smooth;
+  scrollbar-gutter: stable;
 }
 body {
   margin: 0;
@@ -37,6 +44,8 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  font-size: 14px;
+  line-height: 1.5;
 }
 button,
 input,
@@ -65,6 +74,80 @@ button:disabled {
 ::selection {
   color: #fff;
   background: var(--accent);
+}
+
+.sd-page {
+  width: 100%;
+  max-width: 1440px;
+  margin-inline: auto;
+  padding: 28px clamp(16px, 3vw, 40px) 48px;
+}
+
+.sd-surface {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.sd-eyebrow {
+  color: #77847e;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.14em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.sd-page-title {
+  color: #1d2b2f;
+  font-size: clamp(24px, 2vw, 30px);
+  font-weight: 650;
+  letter-spacing: -0.04em;
+  line-height: 1.15;
+}
+
+.sd-section-title {
+  color: #24312c;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  line-height: 1.35;
+}
+
+.workspace-panel > .sd-page {
+  max-width: none;
+  margin: 0;
+  padding: 22px 0 36px;
+}
+
+.sd-sidebar-nav {
+  scrollbar-width: thin;
+  scrollbar-color: #d6dfda transparent;
+}
+
+.sd-sidebar-nav::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sd-sidebar-nav::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #d6dfda;
+}
+
+[data-collapsed="true"] .sd-sidebar-nav {
+  scrollbar-width: none;
+}
+
+[data-collapsed="true"] .sd-sidebar-nav::-webkit-scrollbar {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .sd-page {
+    padding-top: 22px;
+    padding-bottom: 32px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

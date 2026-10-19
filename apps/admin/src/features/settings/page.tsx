@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import type { AcademySettings } from "@sportdesk/contracts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/layout/page-header";
 import { useAuth } from "@/hooks/use-auth";
 import { ApiRequestError } from "@/lib/auth-api";
 import { getAcademySettings, updateAcademySettings } from "@/lib/settings-api";
@@ -65,13 +66,8 @@ export default function SettingsPage() {
   }
 
   return (
-    <section className="mx-auto w-full max-w-5xl px-5 py-8 sm:px-8">
-      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-accent">Workspace</p>
-      <h1 className="mt-2 text-3xl font-bold tracking-tight">Settings</h1>
-      <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-        Manage your academy identity and the timezone used for schedules, attendance and finance
-        reporting.
-      </p>
+    <section className="sd-page">
+      <PageHeader eyebrow="Administration" title="Academy settings" description="Manage your academy identity and the timezone used for schedules, attendance and finance reporting." />
 
       {error ? (
         <div role="alert" className="mt-6 rounded-xl border border-[#f2d5ce] bg-[#fff7f5] p-4 text-sm text-[#984d3f]">

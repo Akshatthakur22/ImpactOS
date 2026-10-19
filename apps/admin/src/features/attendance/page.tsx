@@ -9,6 +9,7 @@ import {
   type AttendanceSessionSummary,
 } from "@sportdesk/contracts";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/layout/page-header";
 import { calendarDateInTimezone, dateRangeInTimezone } from "@/lib/academy-time";
 import {
   correctAttendance,
@@ -244,12 +245,8 @@ export default function AttendancePage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1200px] px-5 py-8 sm:px-8 sm:py-10">
-      <p className="text-sm font-medium text-accent">Daily operations</p>
-      <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em]">Attendance review</h1>
-      <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-        Review coach-submitted records and keep a reason with every owner correction.
-      </p>
+    <div className="sd-page">
+      <PageHeader eyebrow="Academy" title="Attendance review" description="Review coach-submitted records and keep a reason with every authorized correction." />
 
       {error && (
         <div

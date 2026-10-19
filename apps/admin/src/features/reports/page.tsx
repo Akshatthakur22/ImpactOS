@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { calendarDateInTimezone, dateRangeInTimezone } from "@/lib/academy-time";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/layout/page-header";
 import { useAuth } from "@/hooks/use-auth";
 import { getStudents } from "@/lib/academy-api";
 import { getFinanceSummary } from "@/lib/finance-api";
@@ -28,7 +29,8 @@ function downloadCsv(filename: string, rows: Array<Array<string | number>>) {
 }
 
 export default function ReportsPage() {
-  const { accessToken, refreshSession } = useAuth();
+  const { accessToken, refreshSession, user } = useAuth();
+  const canReadStudents = user?.role === "owner" || user?.permissions?.includes("students:read") === true;
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [timezone, setTimezone] = useState("Asia/Kolkata");
@@ -148,12 +150,8 @@ export default function ReportsPage() {
   }
 
   return (
-    <section className="mx-auto w-full max-w-6xl px-5 py-8 sm:px-8">
-      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-accent">Academy data</p>
-      <h1 className="mt-2 text-3xl font-bold tracking-tight">Reports</h1>
-      <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-        Export live attendance, student directory, and finance records for your academy.
-      </p>
+    <section className="sd-page">
+      <PageHeader eyebrow="Academy data" title="Reports" description="Export live attendance, student directory, and finance records for your academy." />
 
       <div className="mt-6 flex flex-wrap items-end gap-3 rounded-2xl border border-line bg-white p-4 shadow-sm">
         <label className="space-y-1 text-xs font-semibold text-muted">
@@ -178,14 +176,14 @@ export default function ReportsPage() {
           disabled={busy !== null}
           onClick={() => void exportAttendance()}
         />
-        <ReportCard
+        {canReadStudents ? <ReportCard
           title="Student directory"
           description="Current student status, active batch assignments, and record creation date. Guardian contact data is omitted."
           buttonLabel="Export student CSV"
           busy={busy === "students"}
           disabled={busy !== null}
           onClick={() => void exportStudents()}
-        />
+        /> : null}
         <ReportCard
           title="Finance summary"
           description="Recorded invoices, receipts, refunds, open balance, expenses, and net cash flow from the selected period."

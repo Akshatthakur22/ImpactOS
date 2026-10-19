@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { AcademyBranch } from "@sportdesk/contracts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/layout/page-header";
 import { useAuth } from "@/hooks/use-auth";
 import { createBranch, getBranches, updateBranch } from "@/lib/operations-api";
 
@@ -129,12 +130,8 @@ export default function BranchesPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1200px] px-5 py-8 sm:px-8 sm:py-10">
-      <p className="text-sm font-medium text-accent">Locations</p>
-      <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em]">Branches</h2>
-      <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-        Keep academy locations in one place and assign them to recurring batch schedules.
-      </p>
+    <div className="sd-page">
+      <PageHeader eyebrow="Academy locations" title="Branches" description="Keep academy locations in one place and assign them to recurring batch schedules." />
       {error ? <div role="alert" className="mt-5 rounded-xl border border-[#f1d8d2] bg-[#fff7f5] px-4 py-3 text-sm text-[#984d3f]">{error}</div> : null}
       {message ? <div role="status" className="mt-5 rounded-xl border border-[#cce3dd] bg-[#eff8f5] px-4 py-3 text-sm text-accent">{message}</div> : null}
 

@@ -42,13 +42,13 @@ export default function LoginPage() {
         <div className="absolute -bottom-36 -left-24 h-[30rem] w-[30rem] rounded-full bg-[#236d64]/40 blur-3xl" />
         <div className="relative flex items-center gap-3">
           <div className="grid h-10 w-10 place-items-center rounded-xl bg-white text-sm font-black text-[#133c3b]">
-            IA
+            SD
           </div>
-          <span className="text-lg font-semibold tracking-tight">Impact Academy</span>
+          <span className="text-lg font-semibold tracking-tight">SportDesk</span>
         </div>
         <div className="relative max-w-xl pb-8">
           <p className="mb-5 text-xs font-semibold uppercase tracking-[0.2em] text-[#9fd1c9]">
-              AthletixOS · Impact Academy
+              SportDesk · Academy admin
           </p>
           <h1 className="max-w-lg text-5xl font-semibold leading-[1.08] tracking-[-0.04em] xl:text-6xl">
             A clearer view of every training day.
@@ -68,9 +68,9 @@ export default function LoginPage() {
         <div className="w-full max-w-[400px]">
           <div className="mb-10 flex items-center gap-3 lg:hidden">
             <div className="grid h-10 w-10 place-items-center rounded-xl bg-[#133c3b] text-sm font-black text-white">
-              IA
+              SD
             </div>
-            <span className="text-lg font-semibold tracking-tight">Impact Academy</span>
+            <span className="text-lg font-semibold tracking-tight">SportDesk</span>
           </div>
           <div className="mb-9">
             <p className="text-sm font-medium text-[#176e67]">Welcome back</p>

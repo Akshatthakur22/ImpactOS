@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { AdminAnnouncement, AnnouncementAudience, Batch } from "@sportdesk/contracts";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/layout/page-header";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -134,12 +135,8 @@ export default function NotificationsPage() {
   }
 
   return (
-    <section className="mx-auto w-full max-w-6xl px-5 py-8 sm:px-8">
-      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-accent">Communication</p>
-      <h1 className="mt-2 text-3xl font-bold tracking-tight">Notices</h1>
-      <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-        Share academy updates with everyone, parents, or coaches. Notices appear in the matching mobile workspace.
-      </p>
+    <section className="sd-page">
+      <PageHeader eyebrow="Communication" title="Notices" description="Share academy updates with everyone, parents, or coaches. Notices appear in the matching mobile workspace." />
 
       <div className="mt-6 rounded-xl border border-[#d8e9e5] bg-[#f1faf7] p-4 text-sm leading-6 text-[#35645e]">
         Publishing adds the notice to the selected audience’s in-app feed. Email and SMS are not connected. Push status is reported after publishing; Expo acceptance does not confirm device display.

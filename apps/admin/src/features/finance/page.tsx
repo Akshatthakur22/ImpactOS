@@ -10,6 +10,7 @@ import type {
 } from "@sportdesk/contracts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/layout/page-header";
 import { ApiRequestError } from "@/lib/auth-api";
 import {
   calendarDateInTimezone,
@@ -82,6 +83,7 @@ function rangeRows(summary: FinanceSummary) {
 export default function FinancePage({ initialTab = "fees" }: { initialTab?: FinanceTab }) {
   const { accessToken, refreshSession, user } = useAuth();
   const canReadFees = user?.role === "owner" || user?.permissions?.includes("payments:read") === true;
+  const canRecordPayments = user?.role === "owner" || user?.permissions?.includes("payments:record") === true;
   const canManageExpenses = user?.role === "owner" || user?.permissions?.includes("expenses:manage") === true;
   const [timezone, setTimezone] = useState("Asia/Kolkata");
   const today = calendarDateInTimezone(new Date(), timezone);
@@ -515,24 +517,15 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
   }
 
   return (
-    <div className="mx-auto max-w-[1320px] px-5 py-8 sm:px-8 sm:py-10">
-        <p className="text-sm font-medium text-accent">Money in and operating costs</p>
-        <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-semibold tracking-[-0.04em]">Finance</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-              Create student invoices, record partial payments, track refunds, and report academy
-              expenses. Parent accounts can view linked invoices and receipts.
-            </p>
-          </div>
-          {canReadFees ? <Button
+    <div className="sd-page">
+        <PageHeader eyebrow="Money in and operating costs" title="Finance" description="Create student invoices, record partial payments, track refunds, and report academy expenses. Parent accounts can view linked invoices and receipts."
+          actions={canReadFees ? <Button
             variant="outline"
             disabled={exporting || loading || !summary}
             onClick={() => void downloadReport()}
           >
             {exporting ? "Preparing report…" : "Export period report"}
-          </Button> : null}
-        </div>
+          </Button> : null} />
 
         {error && (
           <div
@@ -638,8 +631,8 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
         </div>
 
         {canReadFees && tab === "fees" ? (
-          <div className="mt-6 grid items-start gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
-            <section className="rounded-2xl border border-line bg-white p-5 sm:p-6">
+          <div className={`mt-6 grid items-start gap-6 ${canRecordPayments ? "xl:grid-cols-[360px_minmax(0,1fr)]" : "xl:grid-cols-1"}`}>
+            {canRecordPayments ? <section className="rounded-2xl border border-line bg-white p-5 sm:p-6">
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted">
                 New student invoice
               </p>
@@ -746,7 +739,7 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
                   {busy ? "Saving…" : "Create invoice"}
                 </Button>
               </form>
-            </section>
+            </section> : null}
 
             <section className="min-w-0 rounded-2xl border border-line bg-white p-5 sm:p-6">
               <div className="flex flex-wrap items-end justify-between gap-3">
@@ -873,14 +866,14 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
                                       </p>
                                     </div>
                                     <div className="flex gap-2">
-                                      <Button
+                                    <Button
                                         size="sm"
                                         variant="outline"
                                         onClick={() => printReceipt(charge, payment)}
                                       >
                                         Print receipt
-                                      </Button>
-                                      <Button
+                                    </Button>
+                                      {canRecordPayments ? <Button
                                         size="sm"
                                         variant="outline"
                                         disabled={busy || refunded >= payment.amountPaise}
@@ -892,7 +885,7 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
                                         }}
                                       >
                                         Refund
-                                      </Button>
+                                      </Button> : null}
                                     </div>
                                   </div>
                                 );
@@ -900,8 +893,7 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
                             </div>
                           </div>
                         )}
-                        {paymentChargeId === charge.id && (
-                          <form
+                        {paymentChargeId === charge.id && canRecordPayments ? <form
                             className="mt-4 grid gap-3 rounded-xl bg-[#f5f8f7] p-4 sm:grid-cols-2"
                             onSubmit={(event) => void savePayment(event)}
                           >
@@ -961,11 +953,10 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
                                 Cancel
                               </Button>
                             </div>
-                          </form>
-                        )}
+                          </form> : null}
                         {charge.status === "issued" && (
                           <div className="mt-4 flex flex-wrap gap-2">
-                            {open && (
+                            {canRecordPayments && open && (
                               <Button
                                 size="sm"
                                 disabled={busy}
@@ -978,7 +969,7 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
                                 Record payment
                               </Button>
                             )}
-                            {charge.payments.length === 0 && (
+                            {canRecordPayments && charge.payments.length === 0 && (
                               <Button
                                 size="sm"
                                 variant="outline"
@@ -1005,7 +996,7 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
           </div>
         ) : canManageExpenses ? (
           <div className="mt-6 grid items-start gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
-            <section className="rounded-2xl border border-line bg-white p-5 sm:p-6">
+            {canManageExpenses ? <section className="rounded-2xl border border-line bg-white p-5 sm:p-6">
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted">
                 Outgoing expense
               </p>
@@ -1089,9 +1080,9 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
                   {busy ? "Saving…" : "Record expense"}
                 </Button>
               </form>
-            </section>
+            </section> : null}
 
-            <section className="min-w-0 rounded-2xl border border-line bg-white p-5 sm:p-6">
+            {canManageExpenses ? <section className="min-w-0 rounded-2xl border border-line bg-white p-5 sm:p-6">
               <div className="flex flex-wrap items-end justify-between gap-3">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted">
@@ -1171,7 +1162,7 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
                 Reversals preserve the original entry and record the reason. Reversed expenses are
                 excluded from reports.
               </p>
-            </section>
+            </section> : null}
           </div>
         ) : null}
 

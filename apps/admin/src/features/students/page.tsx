@@ -6,6 +6,8 @@ import type { AcademyCatalog, GuardianInvite, Student, StudentStatus } from "@sp
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TableEmptyState } from "@/components/tables/table-empty-state";
+import { PageHeader } from "@/components/layout/page-header";
+import { StatusBadge } from "@/components/ui/status-badge";
 import {
   createEnrollment,
   createStudent,
@@ -29,7 +31,8 @@ const statusLabels: Record<StudentStatus, string> = {
 };
 
 export default function StudentsPage() {
-  const { accessToken, refreshSession } = useAuth();
+  const { accessToken, refreshSession, user } = useAuth();
+  const canWrite = user?.role === "owner" || user?.permissions?.includes("students:write") === true;
   const [catalog, setCatalog] = useState<AcademyCatalog | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
   const [totalStudents, setTotalStudents] = useState(0);
@@ -302,20 +305,11 @@ export default function StudentsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1200px] px-5 py-8 sm:px-8 sm:py-10">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <p className="text-sm font-medium text-accent">Student records</p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em]">Students & guardians</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-              Register students, keep a guardian contact when appropriate, and assign active batch
-              enrollments.
-            </p>
-          </div>
-          <Link href="/operations?section=programs" className="text-sm font-semibold text-accent hover:underline">
+    <div className="sd-page">
+        <PageHeader eyebrow="People" title="Students & guardians" description="Register students, keep a guardian contact when appropriate, and assign active batch enrollments."
+          actions={<Link href="/operations?section=programs" className="text-sm font-semibold text-accent hover:underline">
             Configure programs & batches →
-          </Link>
-        </div>
+          </Link>} />
 
         {error && (
           <div
@@ -348,7 +342,7 @@ export default function StudentsPage() {
         )}
 
         <div className="mt-8 grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
-          <section className="rounded-2xl border border-line bg-white p-5 sm:p-6">
+          {canWrite ? <section className="rounded-2xl border border-line bg-white p-5 sm:p-6">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted">
                 New record
@@ -494,7 +488,7 @@ export default function StudentsPage() {
                 {submitting ? "Saving record…" : "Register student"}
               </Button>
             </form>
-          </section>
+          </section> : <section className="rounded-2xl border border-line bg-white p-5 sm:p-6"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted">Student records</p><h2 className="mt-2 text-lg font-semibold">View access</h2><p className="mt-2 text-sm leading-6 text-muted">You can review student records. Creating or changing student, guardian, and enrollment details requires student management access.</p></section>}
 
           <section className="min-w-0 rounded-2xl border border-line bg-white p-5 sm:p-6">
             <div className="flex items-start justify-between gap-3">
@@ -587,7 +581,7 @@ export default function StudentsPage() {
                                         ? "Invite pending"
                                         : `Invite ${guardian.inviteStatus ?? "not sent"}`}
                                     </span>
-                                    <button
+                                    {canWrite ? <button
                                       type="button"
                                       className="ml-2 font-semibold text-accent hover:underline disabled:opacity-50"
                                       disabled={inviteBusyId === guardian.id}
@@ -602,14 +596,14 @@ export default function StudentsPage() {
                                         : guardian.inviteStatus === "pending"
                                           ? "Revoke"
                                           : "Issue / reissue"}
-                                    </button>
+                                    </button> : null}
                                   </div>
                                 ) : (
                                   <span className="mt-1 inline-block">
                                     Add an email to enable parent access
                                   </span>
                                 )}
-                                <button
+                                {canWrite ? <button
                                   type="button"
                                   className="mt-1 block font-semibold text-accent hover:underline"
                                   onClick={() => {
@@ -618,7 +612,7 @@ export default function StudentsPage() {
                                   }}
                                 >
                                   Edit contact
-                                </button>
+                                </button> : null}
                               </div>
                             ))}
                           </div>
@@ -639,9 +633,7 @@ export default function StudentsPage() {
                         ) && "Not assigned"}
                       </td>
                       <td className="py-3.5">
-                        <span className="rounded-full bg-[#f1f3f4] px-2.5 py-1 text-[11px] font-medium text-muted">
-                          {statusLabels[student.status]}
-                        </span>
+                        <StatusBadge status={student.status} label={statusLabels[student.status]} />
                       </td>
                     </tr>
                   ))}
@@ -714,10 +706,11 @@ export default function StudentsPage() {
             <div className="mt-6 grid gap-8 xl:grid-cols-2">
               <div>
                 <h3 className="text-sm font-semibold">Student details and lifecycle</h3>
-                <form
+                    <form
                   className="mt-3 space-y-3"
                   onSubmit={(event) => void saveStudentDetails(event)}
                 >
+                      <fieldset disabled={!canWrite} className="contents">
                   <div className="grid gap-3 sm:grid-cols-2">
                     <label className="space-y-2 text-sm font-medium">
                       First name
@@ -759,6 +752,7 @@ export default function StudentsPage() {
                   <Button type="submit" disabled={savingDetail}>
                     Save student details
                   </Button>
+                      </fieldset>
                 </form>
 
                 <div className="mt-7 border-t border-line pt-5">
@@ -785,16 +779,16 @@ export default function StudentsPage() {
                                   : `Invite: ${guardian.inviteStatus ?? "not sent"}`}
                               </p>
                             </div>
-                            <Button
+                            {canWrite ? <Button
                               type="button"
                               variant="outline"
                               size="sm"
                               onClick={() => setEditingGuardianId(guardian.id)}
                             >
                               Edit contact
-                            </Button>
+                            </Button> : null}
                           </div>
-                          {!guardian.hasAccount && guardian.email && (
+                          {canWrite && !guardian.hasAccount && guardian.email && (
                             <div className="mt-2 flex gap-3 text-sm">
                               <button
                                 type="button"
@@ -816,7 +810,7 @@ export default function StudentsPage() {
                       ))}
                     </div>
                   )}
-                  {selectedGuardian && editingGuardianId && (
+                  {canWrite && selectedGuardian && editingGuardianId && (
                     <form
                       className="mt-4 space-y-3 rounded-xl bg-[#f7f9f9] p-4"
                       onSubmit={(event) => void saveGuardianDetails(event)}
@@ -907,7 +901,7 @@ export default function StudentsPage() {
                               : ""}
                           </p>
                         </div>
-                        {enrollment.status === "active" && (
+                        {canWrite && enrollment.status === "active" && (
                           <div className="flex flex-wrap gap-2">
                             <Button
                               type="button"
@@ -943,7 +937,7 @@ export default function StudentsPage() {
                   </div>
                 )}
 
-                <div className="mt-5 rounded-xl bg-[#f7f9f9] p-4">
+                {canWrite ? <div className="mt-5 rounded-xl bg-[#f7f9f9] p-4">
                   <h4 className="text-sm font-semibold">Enroll in another batch</h4>
                   <div className="mt-3 flex flex-col gap-3 sm:flex-row">
                     <select
@@ -993,7 +987,7 @@ export default function StudentsPage() {
                       Set the student status to Active before creating a new enrollment.
                     </p>
                   )}
-                </div>
+                </div> : null}
               </div>
             </div>
           </section>
