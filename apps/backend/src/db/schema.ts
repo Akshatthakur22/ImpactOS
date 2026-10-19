@@ -3,6 +3,7 @@ import {
   boolean,
   check,
   date,
+  doublePrecision,
   foreignKey,
   index,
   integer,
@@ -110,6 +111,9 @@ export const academyBranches = pgTable(
       .references(() => academies.id, { onDelete: "restrict" }),
     name: varchar("name", { length: 120 }).notNull(),
     address: varchar("address", { length: 500 }),
+    geofenceLatitude: doublePrecision("geofence_latitude"),
+    geofenceLongitude: doublePrecision("geofence_longitude"),
+    geofenceRadiusMeters: integer("geofence_radius_meters").notNull().default(150),
     isActive: boolean("is_active").notNull().default(true),
     createdBy: uuid("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
@@ -120,6 +124,14 @@ export const academyBranches = pgTable(
     uniqueIndex("academy_branches_academy_name_uq").on(table.academyId, sql`lower(${table.name})`),
     index("academy_branches_academy_active_idx").on(table.academyId, table.isActive),
     check("academy_branches_name_nonempty_chk", sql`length(btrim(${table.name})) > 0`),
+    check(
+      "academy_branches_geofence_pair_chk",
+      sql`(${table.geofenceLatitude} is null and ${table.geofenceLongitude} is null) or (${table.geofenceLatitude} is not null and ${table.geofenceLongitude} is not null and ${table.geofenceLatitude} between -90 and 90 and ${table.geofenceLongitude} between -180 and 180)`,
+    ),
+    check(
+      "academy_branches_geofence_radius_chk",
+      sql`${table.geofenceRadiusMeters} between 25 and 1000`,
+    ),
     foreignKey({
       name: "academy_branches_created_by_academy_fk",
       columns: [table.createdBy, table.academyId],
@@ -1004,6 +1016,10 @@ export const coachSessionPresence = pgTable(
     sessionId: uuid("session_id").notNull(),
     coachId: uuid("coach_id").notNull(),
     checkedInAt: timestamp("checked_in_at", { withTimezone: true, mode: "date" }).notNull(),
+    checkedInLatitude: doublePrecision("checked_in_latitude"),
+    checkedInLongitude: doublePrecision("checked_in_longitude"),
+    checkedInAccuracyMeters: doublePrecision("checked_in_accuracy_meters"),
+    checkedInDistanceMeters: doublePrecision("checked_in_distance_meters"),
     checkedOutAt: timestamp("checked_out_at", { withTimezone: true, mode: "date" }),
   },
   (table) => [
@@ -1098,6 +1114,40 @@ export const progressEntries = pgTable(
     }).onDelete("restrict"),
     foreignKey({
       name: "progress_entries_coach_academy_fk",
+      columns: [table.coachId, table.academyId],
+      foreignColumns: [users.id, users.academyId],
+    }).onDelete("restrict"),
+  ],
+);
+
+export const coachStudentFeedback = pgTable(
+  "coach_student_feedback",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    academyId: uuid("academy_id").notNull(),
+    studentId: uuid("student_id").notNull(),
+    coachId: uuid("coach_id").notNull(),
+    weekOf: date("week_of").notNull(),
+    performance: varchar("performance", { length: 1200 }).notNull(),
+    guidance: varchar("guidance", { length: 1200 }).notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("coach_student_feedback_week_uq").on(
+      table.academyId,
+      table.studentId,
+      table.coachId,
+      table.weekOf,
+    ),
+    index("coach_student_feedback_history_idx").on(table.academyId, table.studentId, table.weekOf),
+    foreignKey({
+      name: "coach_student_feedback_student_academy_fk",
+      columns: [table.studentId, table.academyId],
+      foreignColumns: [students.id, students.academyId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "coach_student_feedback_coach_academy_fk",
       columns: [table.coachId, table.academyId],
       foreignColumns: [users.id, users.academyId],
     }).onDelete("restrict"),

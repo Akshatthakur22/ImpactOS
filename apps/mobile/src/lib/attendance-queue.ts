@@ -1,4 +1,5 @@
 import * as SecureStore from "expo-secure-store";
+import { Platform } from "react-native";
 import type { AttendanceStatus } from "@sportdesk/contracts";
 
 export type QueuedAttendance = {
@@ -14,13 +15,34 @@ const INDEX_KEY = "sportdesk.attendance.queue.v1.index";
 const ENTRY_PREFIX = "sportdesk.attendance.queue.v1.entry.";
 const CHUNK_LENGTH = 900;
 
+function browserStorage() {
+  if (Platform.OS !== "web" || typeof globalThis.sessionStorage === "undefined")
+    throw new Error("Offline attendance storage is unavailable on this device.");
+  return globalThis.sessionStorage;
+}
+
+const storage = {
+  get: (key: string) =>
+    Platform.OS === "web"
+      ? Promise.resolve(browserStorage().getItem(key))
+      : SecureStore.getItemAsync(key),
+  set: (key: string, value: string) =>
+    Platform.OS === "web"
+      ? Promise.resolve(browserStorage().setItem(key, value))
+      : SecureStore.setItemAsync(key, value),
+  remove: (key: string) =>
+    Platform.OS === "web"
+      ? Promise.resolve(browserStorage().removeItem(key))
+      : SecureStore.deleteItemAsync(key),
+};
+
 async function readIndex() {
   try {
-    const value = await SecureStore.getItemAsync(INDEX_KEY);
+    const value = await storage.get(INDEX_KEY);
     const parsed: unknown = value ? JSON.parse(value) : [];
     return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
   } catch {
-    return [];
+    throw new Error("Could not read the offline attendance queue on this device.");
   }
 }
 
@@ -29,13 +51,13 @@ export async function readAttendanceQueue(): Promise<QueuedAttendance[]> {
   const output: QueuedAttendance[] = [];
   for (const id of ids) {
     try {
-      const metadata = await SecureStore.getItemAsync(`${ENTRY_PREFIX}${id}.meta`);
+      const metadata = await storage.get(`${ENTRY_PREFIX}${id}.meta`);
       if (!metadata) continue;
       const chunkCount = Number(metadata);
       if (!Number.isInteger(chunkCount) || chunkCount < 1 || chunkCount > 100) continue;
       let serialized = "";
       for (let index = 0; index < chunkCount; index += 1) {
-        const chunk = await SecureStore.getItemAsync(`${ENTRY_PREFIX}${id}.${index}`);
+        const chunk = await storage.get(`${ENTRY_PREFIX}${id}.${index}`);
         if (chunk === null) throw new Error("Missing queue chunk");
         serialized += chunk;
       }
@@ -58,28 +80,26 @@ export async function enqueueAttendance(item: QueuedAttendance) {
   }
   const prefix = `${ENTRY_PREFIX}${item.sessionId}`;
   for (let index = 0; index < chunks.length; index += 1) {
-    await SecureStore.setItemAsync(`${prefix}.${index}`, chunks[index]!);
+    await storage.set(`${prefix}.${index}`, chunks[index]!);
   }
-  await SecureStore.setItemAsync(`${prefix}.meta`, String(chunks.length));
+  await storage.set(`${prefix}.meta`, String(chunks.length));
   const ids = await readIndex();
   if (!ids.includes(item.sessionId)) ids.push(item.sessionId);
-  await SecureStore.setItemAsync(INDEX_KEY, JSON.stringify(ids));
+  await storage.set(INDEX_KEY, JSON.stringify(ids));
   return readAttendanceQueue();
 }
 
 export async function removeQueuedAttendance(sessionId: string) {
   const ids = await readIndex();
-  await SecureStore.setItemAsync(INDEX_KEY, JSON.stringify(ids.filter((id) => id !== sessionId)));
+  await storage.set(INDEX_KEY, JSON.stringify(ids.filter((id) => id !== sessionId)));
   const prefix = `${ENTRY_PREFIX}${sessionId}`;
-  const metadata = await SecureStore.getItemAsync(`${prefix}.meta`);
+  const metadata = await storage.get(`${prefix}.meta`);
   const count = Number(metadata);
   if (Number.isInteger(count) && count > 0 && count <= 100) {
     await Promise.all(
-      Array.from({ length: count }, (_, index) =>
-        SecureStore.deleteItemAsync(`${prefix}.${index}`),
-      ),
+      Array.from({ length: count }, (_, index) => storage.remove(`${prefix}.${index}`)),
     );
   }
-  await SecureStore.deleteItemAsync(`${prefix}.meta`);
+  await storage.remove(`${prefix}.meta`);
   return readAttendanceQueue();
 }

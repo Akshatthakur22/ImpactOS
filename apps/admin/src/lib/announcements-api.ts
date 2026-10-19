@@ -1,4 +1,5 @@
 import {
+  AnnouncementPublishResultSchema,
   AdminAnnouncementListSchema,
   ApiErrorSchema,
   CreateAnnouncementRequestSchema,
@@ -90,7 +91,7 @@ export function publishAnnouncement(
 ) {
   return request(
     `/announcements/${announcementId}/publish`,
-    UpdatedRecordSchema,
+    AnnouncementPublishResultSchema,
     accessToken,
     refresh,
     { method: "POST" },

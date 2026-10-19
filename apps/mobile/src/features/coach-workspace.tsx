@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   AppState,
   Pressable,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -13,19 +14,29 @@ import {
 } from "react-native";
 import {
   AttendanceStatusSchema,
+  ChangePasswordRequestSchema,
+  CoachStudentFeedbackSchema,
+  CoachStudentHistorySchema,
+  CoachStudentFeedbackRequestSchema,
   CoachStudentSchema,
   ParentAnnouncementListSchema,
   SessionRosterSchema,
   TrainingSessionSchema,
+  UpdateCoachProfileRequestSchema,
   type AttendanceStatus,
   type AuthData,
   type CoachStudent,
+  type CoachStudentFeedback,
+  type CoachStudentHistory,
   type ParentAnnouncement,
   type SessionRoster,
   type TrainingSession,
 } from "@sportdesk/contracts";
+import * as Location from "expo-location";
 import { z } from "zod";
 import { requestMobileData } from "@/lib/api";
+import { WorkspaceIcon, type WorkspaceIconName } from "@/components/workspace-icon";
+import { syncCoachClassReminders } from "@/lib/push-notifications";
 import {
   enqueueAttendance,
   readAttendanceQueue,
@@ -33,22 +44,31 @@ import {
   type QueuedAttendance,
 } from "@/lib/attendance-queue";
 
+const coachIconByTab: Record<(typeof navItems)[number]["id"], WorkspaceIconName> = {
+  today: "home",
+  classes: "calendar",
+  students: "students",
+  profile: "profile",
+};
+
 const colors = {
-  brand: "#2563EB",
-  brandSoft: "#EFF6FF",
-  ink: "#111827",
-  text: "#4B5563",
-  muted: "#6B7280",
-  canvas: "#F7F8FA",
+  brand: "#176B58",
+  brandSoft: "#E8F3EC",
+  ink: "#183630",
+  text: "#526B64",
+  muted: "#7E928B",
+  canvas: "#F4F7F4",
   surface: "#FFFFFF",
-  subtle: "#F3F4F6",
-  border: "#E5E7EB",
-  success: "#15803D",
-  successSoft: "#F0FDF4",
-  warning: "#B45309",
-  warningSoft: "#FFFBEB",
-  danger: "#B91C1C",
-  dangerSoft: "#FEF2F2",
+  subtle: "#EDF2EE",
+  border: "#E2EAE4",
+  success: "#23845B",
+  successSoft: "#E9F5ED",
+  warning: "#A96B19",
+  warningSoft: "#FBF2DE",
+  danger: "#B95043",
+  dangerSoft: "#F9ECE8",
+  coral: "#E28669",
+  sunny: "#F3D27C",
 };
 
 const statusOptions = AttendanceStatusSchema.options;
@@ -59,11 +79,10 @@ const statusLabels: Record<AttendanceStatus, string> = {
   excused: "Excused",
 };
 const navItems = [
-  { id: "today", label: "Today", icon: "⌂" },
-  { id: "attendance", label: "Attend", icon: "✓" },
-  { id: "classes", label: "Classes", icon: "▦" },
-  { id: "students", label: "Students", icon: "◎" },
-  { id: "profile", label: "Profile", icon: "○" },
+  { id: "today", label: "Today", icon: "home" },
+  { id: "classes", label: "Classes", icon: "calendar" },
+  { id: "students", label: "Students", icon: "students" },
+  { id: "profile", label: "Profile", icon: "profile" },
 ] as const;
 type CoachTab = (typeof navItems)[number]["id"] | "notices";
 
@@ -94,6 +113,21 @@ function sameLocalDay(value: string | Date, timeZone: string, now = new Date()) 
   return format.format(new Date(value)) === format.format(now);
 }
 
+function currentWeekStart(timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const get = (type: "year" | "month" | "day") =>
+    parts.find((part) => part.type === type)?.value ?? "1970";
+  const date = new Date(`${get("year")}-${get("month")}-${get("day")}T12:00:00.000Z`);
+  const daysFromMonday = (date.getUTCDay() + 6) % 7;
+  date.setUTCDate(date.getUTCDate() - daysFromMonday);
+  return date.toISOString().slice(0, 10);
+}
+
 function EmptyState({ title, detail }: { title: string; detail: string }) {
   return (
     <View style={styles.emptyState}>
@@ -116,6 +150,21 @@ function SessionCard({
 }) {
   const completed = session.status === "completed";
   const cancelled = session.status === "cancelled";
+  const opensAt = new Date(session.startsAt).getTime() - 15 * 60_000;
+  const now = Date.now();
+  const actionLabel = completed
+    ? "Done"
+    : cancelled
+      ? "Cancelled"
+      : session.coachCheckedInAt
+        ? "Checked in"
+        : now >= new Date(session.endsAt).getTime()
+          ? "Attendance still due"
+          : now >= new Date(session.startsAt).getTime()
+            ? "In progress"
+        : now < opensAt
+          ? `Check-in opens ${formatTime(new Date(opensAt).toISOString(), timeZone)}`
+          : "Check in when you arrive";
   return (
     <Pressable
       accessibilityRole="button"
@@ -137,14 +186,8 @@ function SessionCard({
           {session.branchName ? `${session.branchName} · ` : ""}
           {session.venue ?? "Venue not set"}
         </Text>
-        <Text
-          style={[
-            styles.sessionState,
-            completed && styles.completedText,
-            cancelled && styles.cancelledText,
-          ]}
-        >
-          {completed ? "Completed" : cancelled ? "Cancelled" : "Attendance ready"}
+        <Text style={[styles.sessionState, completed && styles.completedText, cancelled && styles.cancelledText]}>
+          {actionLabel}
         </Text>
       </View>
       {!cancelled ? <Text style={styles.chevron}>{completed ? "›" : "›"}</Text> : null}
@@ -176,6 +219,20 @@ export function CoachWorkspace({
   const [progressBusyId, setProgressBusyId] = useState<string | null>(null);
   const [announcements, setAnnouncements] = useState<ParentAnnouncement[]>([]);
   const [students, setStudents] = useState<CoachStudent[]>([]);
+  const [selectedStudent, setSelectedStudent] = useState<CoachStudent | null>(null);
+  const [studentFeedback, setStudentFeedback] = useState<CoachStudentFeedback[]>([]);
+  const [studentHistory, setStudentHistory] = useState<CoachStudentHistory | null>(null);
+  const [studentFeedbackLoading, setStudentFeedbackLoading] = useState(false);
+  const [feedbackPerformance, setFeedbackPerformance] = useState("");
+  const [feedbackGuidance, setFeedbackGuidance] = useState("");
+  const [feedbackSaving, setFeedbackSaving] = useState(false);
+  const [profileName, setProfileName] = useState(auth.user.displayName);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [oldestLoadedDays, setOldestLoadedDays] = useState(76);
+  const [classView, setClassView] = useState<"upcoming" | "history">("upcoming");
   const [tab, setTab] = useState<CoachTab>("today");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -193,6 +250,10 @@ export function CoachWorkspace({
       .then((queue) => {
         if (active) setQueuedAttendance(queue);
       })
+      .catch((caught: unknown) => {
+        if (active)
+          setError(caught instanceof Error ? caught.message : "Could not read offline attendance.");
+      })
       .finally(() => {
         if (active) setQueueReady(true);
       });
@@ -202,32 +263,53 @@ export function CoachWorkspace({
   }, []);
 
   const loadSessions = useCallback(async () => {
+    const now = Date.now();
+    const from = new Date(now - 76 * 86_400_000).toISOString();
+    const to = new Date(now + 14 * 86_400_000).toISOString();
     const result = await requestMobileData(
-      "/coach/me/sessions",
+      `/coach/me/sessions?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
       (value) => z.object({ sessions: TrainingSessionSchema.array() }).parse(value),
       auth,
       onAuthUpdate,
     );
     setSessions(result.sessions);
+    void syncCoachClassReminders(result.sessions);
   }, [auth, onAuthUpdate]);
 
   async function syncQueueItem(item: QueuedAttendance) {
     if (item.coachUserId !== auth.user.id)
       throw new Error("Sign in as the coach who recorded this offline attendance to sync it.");
-    await requestMobileData(
-      `/coach/sessions/${item.sessionId}/attendance`,
-      (value) => value,
+    const roster = await requestMobileData(
+      `/coach/sessions/${item.sessionId}/roster`,
+      (value) => SessionRosterSchema.parse(value),
       auth,
       onAuthUpdate,
-      { method: "PUT", body: JSON.stringify({ records: item.records }) },
     );
-    await requestMobileData(
-      `/coach/sessions/${item.sessionId}/complete`,
-      (value) => value,
-      auth,
-      onAuthUpdate,
-      { method: "POST" },
-    );
+    if (roster.session.status === "completed") {
+      const actual = new Map(roster.students.map((student) => [student.studentId, student.status]));
+      const matches =
+        item.records.length === roster.students.length &&
+        item.records.every((record) => actual.get(record.studentId) === record.status);
+      if (!matches)
+        throw new Error(
+          "This class is already complete with different attendance. Ask the academy to review it.",
+        );
+    } else {
+      await requestMobileData(
+        `/coach/sessions/${item.sessionId}/attendance`,
+        (value) => value,
+        auth,
+        onAuthUpdate,
+        { method: "PUT", body: JSON.stringify({ records: item.records }) },
+      );
+      await requestMobileData(
+        `/coach/sessions/${item.sessionId}/complete`,
+        (value) => value,
+        auth,
+        onAuthUpdate,
+        { method: "POST" },
+      );
+    }
     const next = await removeQueuedAttendance(item.sessionId);
     setQueuedAttendance(next);
   }
@@ -235,17 +317,16 @@ export function CoachWorkspace({
   async function syncQueuedAttendance() {
     if (queueSyncLock.current) return;
     queueSyncLock.current = true;
-    const pending = await readAttendanceQueue();
-    setQueuedAttendance(pending);
-    if (!pending.length) {
-      queueSyncLock.current = false;
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    setNotice(null);
     let synced = 0;
+    let markedBusy = false;
     try {
+      const pending = await readAttendanceQueue();
+      setQueuedAttendance(pending);
+      if (!pending.length) return;
+      setBusy(true);
+      markedBusy = true;
+      setError(null);
+      setNotice(null);
       for (const item of pending) {
         await syncQueueItem(item);
         synced += 1;
@@ -261,19 +342,32 @@ export function CoachWorkspace({
           `${synced} queued class${synced === 1 ? "" : "es"} synced; the remaining entries are still saved on this device.`,
         );
     } finally {
-      setBusy(false);
+      if (markedBusy) setBusy(false);
       queueSyncLock.current = false;
     }
   }
 
+  const syncQueueRef = useRef(syncQueuedAttendance);
+  syncQueueRef.current = syncQueuedAttendance;
+
   useEffect(() => {
     if (!queueReady || !queuedAttendance.length) return;
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") void syncQueuedAttendance();
+      if (state === "active") void syncQueueRef.current();
     });
-    if (AppState.currentState === "active") void syncQueuedAttendance();
-    return () => subscription.remove();
-  }, [queueReady, auth.user.id]);
+    const onlineTarget = typeof window === "undefined" ? null : window;
+    const handleOnline = () => void syncQueueRef.current();
+    onlineTarget?.addEventListener("online", handleOnline);
+    const retryTimer = setInterval(() => {
+      if (AppState.currentState === "active") void syncQueueRef.current();
+    }, 30_000);
+    if (AppState.currentState === "active") void syncQueueRef.current();
+    return () => {
+      subscription.remove();
+      onlineTarget?.removeEventListener("online", handleOnline);
+      clearInterval(retryTimer);
+    };
+  }, [queueReady, queuedAttendance.length, auth.user.id]);
 
   useEffect(() => {
     let active = true;
@@ -347,15 +441,30 @@ export function CoachWorkspace({
     [sessions],
   );
   const todaysSessions = useMemo(
-    () => sortedSessions.filter((session) => sameLocalDay(session.startsAt, timeZone)),
+    () =>
+      sortedSessions.filter(
+        (session) => session.status !== "cancelled" && sameLocalDay(session.startsAt, timeZone),
+      ),
     [sortedSessions, timeZone],
   );
   const availableSessions = useMemo(
-    () => sortedSessions.filter((session) => session.status !== "cancelled"),
+    () =>
+      [...sortedSessions].sort((a, b) => {
+        const rank = (session: TrainingSession) =>
+          session.status === "scheduled" ? 0 : session.status === "completed" ? 1 : 2;
+        const statusOrder = rank(a) - rank(b);
+        if (statusOrder) return statusOrder;
+        const timeOrder = new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime();
+        return a.status === "scheduled" ? timeOrder : -timeOrder;
+      }),
     [sortedSessions],
   );
   const unreadCount = announcements.filter((announcement) => !announcement.readAt).length;
   const completedToday = todaysSessions.filter((session) => session.status === "completed").length;
+  const nextTodaySession =
+    todaysSessions.find(
+      (session) => session.status === "scheduled" && new Date(session.startsAt).getTime() > Date.now(),
+    ) ?? [...todaysSessions].reverse().find((session) => session.status === "scheduled");
   const firstName = auth.user.displayName.trim().split(/\s+/)[0] || "Coach";
 
   async function refreshSessions() {
@@ -367,6 +476,146 @@ export function CoachWorkspace({
       setError(caught instanceof Error ? caught.message : "Could not refresh your classes.");
     } finally {
       setRefreshing(false);
+    }
+  }
+
+  async function loadOlderSessions() {
+    const toDays = oldestLoadedDays;
+    const fromDays = oldestLoadedDays + 90;
+    setRefreshing(true);
+    setError(null);
+    try {
+      const now = Date.now();
+      const result = await requestMobileData(
+        `/coach/me/sessions?from=${encodeURIComponent(new Date(now - fromDays * 86_400_000).toISOString())}&to=${encodeURIComponent(new Date(now - toDays * 86_400_000).toISOString())}`,
+        (value) => z.object({ sessions: TrainingSessionSchema.array() }).parse(value),
+        auth,
+        onAuthUpdate,
+      );
+      setSessions((current) => {
+        const byId = new Map(current.map((session) => [session.id, session]));
+        for (const session of result.sessions) byId.set(session.id, session);
+        return [...byId.values()];
+      });
+      setOldestLoadedDays(fromDays);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not load earlier classes.");
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  async function openStudent(student: CoachStudent) {
+    setSelectedStudent(student);
+    setStudentFeedback([]);
+    setStudentHistory(null);
+    setFeedbackPerformance("");
+    setFeedbackGuidance("");
+    setStudentFeedbackLoading(true);
+    setError(null);
+    try {
+      const [feedback, history] = await Promise.all([
+        requestMobileData(
+          `/coach/students/${student.studentId}/feedback`,
+          (value) => z.object({ entries: CoachStudentFeedbackSchema.array() }).parse(value),
+          auth,
+          onAuthUpdate,
+        ),
+        requestMobileData(
+          `/coach/students/${student.studentId}/history`,
+          (value) => CoachStudentHistorySchema.parse(value),
+          auth,
+          onAuthUpdate,
+        ),
+      ]);
+      setStudentFeedback(feedback.entries);
+      setStudentHistory(history);
+      const currentWeek = feedback.entries.find(
+        (entry) => entry.weekOf === currentWeekStart(timeZone),
+      );
+      if (currentWeek) {
+        setFeedbackPerformance(currentWeek.performance);
+        setFeedbackGuidance(currentWeek.guidance);
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not load this student’s history.");
+    } finally {
+      setStudentFeedbackLoading(false);
+    }
+  }
+
+  async function saveWeeklyFeedback() {
+    if (!selectedStudent || !feedbackPerformance.trim()) return;
+    setFeedbackSaving(true);
+    setError(null);
+    try {
+      const payload = CoachStudentFeedbackRequestSchema.parse({
+        weekOf: currentWeekStart(timeZone),
+        performance: feedbackPerformance,
+        guidance: feedbackGuidance,
+      });
+      const saved = await requestMobileData(
+        `/coach/students/${selectedStudent.studentId}/feedback`,
+        (value) => CoachStudentFeedbackSchema.parse(value),
+        auth,
+        onAuthUpdate,
+        { method: "PUT", body: JSON.stringify(payload) },
+      );
+      setStudentFeedback((current) => [
+        saved,
+        ...current.filter((entry) => entry.weekOf !== saved.weekOf),
+      ]);
+      setNotice("This week’s feedback is saved.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save weekly feedback.");
+    } finally {
+      setFeedbackSaving(false);
+    }
+  }
+
+  async function saveCoachProfile() {
+    setProfileSaving(true);
+    setError(null);
+    try {
+      const input = UpdateCoachProfileRequestSchema.parse({ displayName: profileName });
+      const profile = await requestMobileData(
+        "/coach/me/profile",
+        (value) =>
+          z
+            .object({ id: z.string().uuid(), displayName: z.string(), email: z.string() })
+            .parse(value),
+        auth,
+        onAuthUpdate,
+        { method: "PUT", body: JSON.stringify(input) },
+      );
+      onAuthUpdate({ ...auth, user: { ...auth.user, displayName: profile.displayName } });
+      setNotice("Your profile is updated.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not update your profile.");
+    } finally {
+      setProfileSaving(false);
+    }
+  }
+
+  async function changeCoachPassword() {
+    setPasswordSaving(true);
+    setError(null);
+    try {
+      const payload = ChangePasswordRequestSchema.parse({ currentPassword, newPassword });
+      await requestMobileData(
+        "/auth/password/change",
+        (value) => z.object({ updated: z.boolean() }).parse(value),
+        auth,
+        onAuthUpdate,
+        { method: "POST", body: JSON.stringify(payload) },
+      );
+      setCurrentPassword("");
+      setNewPassword("");
+      setNotice("Your password is changed.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not change your password.");
+    } finally {
+      setPasswordSaving(false);
     }
   }
 
@@ -401,7 +650,7 @@ export function CoachWorkspace({
     setError(null);
     setNotice(null);
     setRosterLoading(true);
-    setTab("attendance");
+    setTab("classes");
     try {
       const result = await requestMobileData(
         `/coach/sessions/${session.id}/roster`,
@@ -420,7 +669,6 @@ export function CoachWorkspace({
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load this class roster.");
-      setSelected(null);
     } finally {
       setRosterLoading(false);
     }
@@ -432,6 +680,22 @@ export function CoachWorkspace({
     setError(null);
     setNotice(null);
     try {
+      let body: string | undefined;
+      if (action === "check-in") {
+        const permission = await Location.requestForegroundPermissionsAsync();
+        if (!permission.granted) {
+          throw new Error("Allow location access so the academy can verify you’re at this branch.");
+        }
+        const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+        if (position.coords.accuracy === null || position.coords.accuracy > 50) {
+          throw new Error("Your location is not accurate enough. Move outdoors and try again.");
+        }
+        body = JSON.stringify({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracyMeters: position.coords.accuracy,
+        });
+      }
       const presence = await requestMobileData(
         `/coach/sessions/${selected.id}/${action}`,
         (value) =>
@@ -443,7 +707,7 @@ export function CoachWorkspace({
             .parse(value),
         auth,
         onAuthUpdate,
-        { method: "POST" },
+        { method: "POST", ...(body ? { body } : {}) },
       );
       const updateSession = (session: TrainingSession): TrainingSession =>
         session.id === selected.id
@@ -460,7 +724,7 @@ export function CoachWorkspace({
       );
       setNotice(
         action === "check-in"
-          ? "Your class check-in time is recorded."
+          ? "Location verified. Your check-in time is recorded."
           : "Your class check-out time is recorded.",
       );
     } catch (caught) {
@@ -479,6 +743,14 @@ export function CoachWorkspace({
 
   async function saveAttendance() {
     if (!selected || !roster || selected.status !== "scheduled") return;
+    if (!selected.coachCheckedInAt) {
+      setError("Check in to this class before recording attendance.");
+      return;
+    }
+    if (Date.now() < new Date(selected.startsAt).getTime()) {
+      setError("Student attendance opens when the class starts.");
+      return;
+    }
     const allMarked = roster.students.every((student) => attendance[student.studentId]);
     if (!allMarked) {
       setError("Choose an attendance status for every student before saving.");
@@ -487,8 +759,9 @@ export function CoachWorkspace({
     setBusy(true);
     setError(null);
     setNotice(null);
+    let queued: QueuedAttendance[];
     try {
-      const queued = await enqueueAttendance({
+      queued = await enqueueAttendance({
         sessionId: selected.id,
         coachUserId: auth.user.id,
         batchName: selected.batchName,
@@ -499,14 +772,25 @@ export function CoachWorkspace({
         })),
         queuedAt: new Date().toISOString(),
       });
-      setQueuedAttendance(queued);
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : "Could not save attendance on this device.",
+      );
+      setNotice(null);
+      setBusy(false);
+      return;
+    }
+    setQueuedAttendance(queued);
+    try {
       await syncQueueItem(queued.find((item) => item.sessionId === selected.id)!);
       closeSession();
       setNotice("Attendance saved and class completed.");
       await loadSessions();
     } catch (caught) {
       setNotice(
-        "Attendance is saved securely on this device and queued to sync when the connection returns.",
+        Platform.OS === "web"
+          ? "Attendance is saved in this browser session and will retry when you return online."
+          : "Attendance is saved securely on this device and will retry when you return online.",
       );
       setError(caught instanceof Error ? caught.message : "Could not sync attendance yet.");
     } finally {
@@ -555,7 +839,7 @@ export function CoachWorkspace({
     setRoster(null);
     setError(null);
     setRosterLoading(true);
-    setTab("attendance");
+    setTab("classes");
     try {
       const result = await requestMobileData(
         `/coach/sessions/${session.id}/roster`,
@@ -573,7 +857,6 @@ export function CoachWorkspace({
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load this class roster.");
-      setSelected(null);
     } finally {
       setRosterLoading(false);
     }
@@ -597,9 +880,34 @@ export function CoachWorkspace({
   function renderNotices() {
     if (announcementError)
       return (
-        <Text accessibilityRole="alert" style={styles.error}>
-          {announcementError}
-        </Text>
+        <View>
+          <Text accessibilityRole="alert" style={styles.error}>
+            {announcementError}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => {
+              setAnnouncementError(null);
+              setAnnouncementsLoading(true);
+              void requestMobileData(
+                "/coach/announcements",
+                (value) => ParentAnnouncementListSchema.parse(value),
+                auth,
+                onAuthUpdate,
+              )
+                .then((result) => setAnnouncements(result.announcements))
+                .catch((caught) =>
+                  setAnnouncementError(
+                    caught instanceof Error ? caught.message : "Could not load academy notices.",
+                  ),
+                )
+                .finally(() => setAnnouncementsLoading(false));
+            }}
+            style={styles.textButton}
+          >
+            <Text style={styles.textButtonLabel}>Retry notices</Text>
+          </Pressable>
+        </View>
       );
     if (announcementsLoading)
       return <ActivityIndicator style={styles.loader} color={colors.brand} />;
@@ -640,8 +948,29 @@ export function CoachWorkspace({
 
   function renderRoster() {
     if (rosterLoading) return <ActivityIndicator style={styles.loader} color={colors.brand} />;
-    if (!selected || !roster) return null;
+    if (!selected) return null;
+    if (!roster)
+      return (
+        <View>
+          <Text style={styles.supporting}>The class roster could not be loaded.</Text>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() =>
+              void (selected.status === "scheduled"
+                ? openSession(selected)
+                : completeReadOnly(selected))
+            }
+            style={styles.textButton}
+          >
+            <Text style={styles.textButtonLabel}>Retry roster</Text>
+          </Pressable>
+        </View>
+      );
     const readOnly = selected.status !== "scheduled";
+    const classStarted = Date.now() >= new Date(selected.startsAt).getTime();
+    const checkInOpens = new Date(selected.startsAt).getTime() - 15 * 60_000;
+    const checkInOpen = Date.now() >= checkInOpens;
+    const canMarkAttendance = !readOnly && classStarted && !!selected.coachCheckedInAt;
     const remainingMarks = roster.students.filter(
       (student) => !attendance[student.studentId],
     ).length;
@@ -657,7 +986,7 @@ export function CoachWorkspace({
           <Text style={styles.pageTitle}>{selected.batchName}</Text>
           <Text style={styles.supporting}>
             {selected.branchName ? `${selected.branchName} · ` : ""}
-            {selected.venue ?? "Venue not set"} · {roster.students.length} students
+            {selected.venue ?? "Venue not set"} · {formatTime(selected.endsAt, timeZone)} end · {roster.students.length} students
           </Text>
           {readOnly ? (
             <Text style={styles.readOnlyNote}>
@@ -665,7 +994,14 @@ export function CoachWorkspace({
             </Text>
           ) : null}
           <View style={styles.sessionPresenceCard}>
-            <Text style={styles.sessionPresenceTitle}>Coach time</Text>
+            <Text style={styles.sessionPresenceTitle}>Class check-in</Text>
+            {!selected.coachCheckedInAt ? (
+              <Text style={styles.sessionPresenceHint}>
+                {checkInOpen
+                  ? "You’re in the check-in window. Check in when you arrive."
+                  : `Check-in opens at ${formatTime(new Date(checkInOpens).toISOString(), timeZone)} — 15 minutes before class.`}
+              </Text>
+            ) : null}
             {selected.coachCheckedInAt ? (
               <Text style={styles.sessionPresenceText}>
                 Checked in · {formatTime(selected.coachCheckedInAt, timeZone)}
@@ -679,11 +1015,11 @@ export function CoachWorkspace({
             {!readOnly && !selected.coachCheckedInAt ? (
               <Pressable
                 accessibilityRole="button"
-                disabled={busy}
+                disabled={busy || !checkInOpen}
                 onPress={() => void recordSessionTime("check-in")}
-                style={[styles.presenceButton, busy && styles.disabled]}
+                style={[styles.presenceButton, (busy || !checkInOpen) && styles.disabled]}
               >
-                <Text style={styles.presenceButtonText}>Check in to class</Text>
+                <Text style={styles.presenceButtonText}>I’ve arrived · Check in</Text>
               </Pressable>
             ) : null}
             {!readOnly && selected.coachCheckedInAt && !selected.coachCheckedOutAt ? (
@@ -696,11 +1032,38 @@ export function CoachWorkspace({
                 <Text style={styles.presenceButtonText}>Check out of class</Text>
               </Pressable>
             ) : null}
-            {!selected.coachCheckedInAt && !readOnly ? (
-              <Text style={styles.sessionPresenceHint}>
-                Record your arrival before taking attendance.
-              </Text>
+            {selected.coachCheckedInAt && !classStarted && !readOnly ? (
+              <Text style={styles.sessionPresenceHint}>Attendance opens when class starts.</Text>
             ) : null}
+          </View>
+        </View>
+        <View style={styles.workflowCard}>
+          <View style={styles.workflowStep}>
+            <View style={[styles.workflowNumber, selected.coachCheckedInAt && styles.workflowDone]}>
+              <Text style={[styles.workflowNumberText, selected.coachCheckedInAt && styles.workflowDoneText]}>
+                {selected.coachCheckedInAt ? "✓" : "1"}
+              </Text>
+            </View>
+            <View style={styles.workflowCopy}>
+              <Text style={styles.workflowTitle}>Arrive & check in</Text>
+              <Text style={styles.workflowDetail}>Available 15 minutes before class</Text>
+            </View>
+          </View>
+          <View style={styles.workflowRule} />
+          <View style={styles.workflowStep}>
+            <View style={[styles.workflowNumber, canMarkAttendance && styles.workflowCurrent]}>
+              <Text style={[styles.workflowNumberText, canMarkAttendance && styles.workflowCurrentText]}>2</Text>
+            </View>
+            <View style={styles.workflowCopy}>
+              <Text style={styles.workflowTitle}>Mark the group</Text>
+              <Text style={styles.workflowDetail}>
+                {!selected.coachCheckedInAt
+                  ? "Check in first"
+                  : classStarted
+                    ? `${roster.students.length - remainingMarks} of ${roster.students.length} marked`
+                    : "Opens at class start"}
+              </Text>
+            </View>
           </View>
         </View>
         {!roster.students.length ? (
@@ -709,8 +1072,23 @@ export function CoachWorkspace({
             detail="There are no active enrollments in this class."
           />
         ) : (
-          <View style={styles.rosterCard}>
-            {roster.students.map((student, index) => (
+          <>
+            <View style={styles.attendanceHeading}>
+              <View style={styles.workflowCopy}>
+                <Text style={styles.sectionTitle}>Attendance</Text>
+                <Text style={styles.supporting}>{roster.students.length - remainingMarks} of {roster.students.length} marked</Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                disabled={!canMarkAttendance}
+                onPress={() => setAttendance(Object.fromEntries(roster.students.map((student) => [student.studentId, "present" as const])))}
+                style={[styles.markAllButton, !canMarkAttendance && styles.disabled]}
+              >
+                <Text style={styles.markAllLabel}>All present</Text>
+              </Pressable>
+            </View>
+            <View style={styles.rosterCard}>
+              {roster.students.map((student, index) => (
               <View
                 key={student.studentId}
                 style={[styles.progressRowWrap, index > 0 && styles.divider]}
@@ -725,7 +1103,7 @@ export function CoachWorkspace({
                           key={status}
                           accessibilityRole="button"
                           accessibilityState={{ selected: active, disabled: readOnly }}
-                          disabled={readOnly}
+                          disabled={!canMarkAttendance}
                           onPress={() =>
                             setAttendance((current) => ({
                               ...current,
@@ -735,7 +1113,7 @@ export function CoachWorkspace({
                           style={[
                             styles.statusChoice,
                             active && styles.statusChoiceActive,
-                            readOnly && styles.readOnlyChoice,
+                            !canMarkAttendance && styles.readOnlyChoice,
                           ]}
                         >
                           <Text
@@ -744,7 +1122,7 @@ export function CoachWorkspace({
                               active && styles.statusChoiceTextActive,
                             ]}
                           >
-                            {statusLabels[status]}
+                            {status === "present" ? "Present" : status === "absent" ? "Absent" : statusLabels[status]}
                           </Text>
                         </Pressable>
                       );
@@ -839,28 +1217,36 @@ export function CoachWorkspace({
                     })()
                   : null}
               </View>
-            ))}
-          </View>
+              ))}
+            </View>
+          </>
         )}
         {!readOnly && roster.students.length ? (
-          <Pressable
-            accessibilityRole="button"
-            disabled={busy || remainingMarks > 0}
-            onPress={() => void saveAttendance()}
-            style={({ pressed }) => [
-              styles.primaryButton,
-              pressed && styles.pressed,
-              (busy || remainingMarks > 0) && styles.disabled,
-            ]}
-          >
-            <Text style={styles.primaryButtonText}>
-              {busy
-                ? "Saving attendance…"
-                : remainingMarks > 0
-                  ? `Mark ${remainingMarks} more students`
-                  : "Save and finish class"}
-            </Text>
-          </Pressable>
+          <>
+            <Pressable
+              accessibilityRole="button"
+              disabled={busy || remainingMarks > 0 || !canMarkAttendance}
+              onPress={() => void saveAttendance()}
+              style={({ pressed }) => [
+                styles.primaryButton,
+                pressed && styles.pressed,
+                (busy || remainingMarks > 0 || !canMarkAttendance) && styles.disabled,
+              ]}
+            >
+              <Text style={styles.primaryButtonText}>
+                {busy
+                  ? "Saving attendance…"
+                  : !selected.coachCheckedInAt
+                    ? "Check in to take attendance"
+                    : !classStarted
+                      ? "Attendance opens at class time"
+                      : remainingMarks > 0
+                        ? `Mark ${remainingMarks} more students`
+                        : "Save and finish class"}
+              </Text>
+            </Pressable>
+            <Text style={styles.finishHint}>Finishing also checks you out if you haven’t already.</Text>
+          </>
         ) : null}
       </>
     );
@@ -879,8 +1265,63 @@ export function CoachWorkspace({
             <Text style={styles.supporting}>{auth.user.email}</Text>
             <Text style={styles.academyName}>{auth.user.academyName}</Text>
           </View>
+          <View style={styles.profileForm}>
+            <Text style={styles.formLabel}>Display name</Text>
+            <TextInput
+              accessibilityLabel="Display name"
+              value={profileName}
+              onChangeText={setProfileName}
+              style={styles.progressInput}
+              maxLength={160}
+            />
+            <Pressable
+              accessibilityRole="button"
+              disabled={profileSaving || !profileName.trim()}
+              onPress={() => void saveCoachProfile()}
+              style={[
+                styles.primaryButton,
+                (profileSaving || !profileName.trim()) && styles.disabled,
+              ]}
+            >
+              <Text style={styles.primaryButtonText}>
+                {profileSaving ? "Saving…" : "Save profile"}
+              </Text>
+            </Pressable>
+          </View>
+          <View style={styles.profileForm}>
+            <Text style={styles.sectionTitle}>Change password</Text>
+            <TextInput
+              accessibilityLabel="Current password"
+              placeholder="Current password"
+              value={currentPassword}
+              onChangeText={setCurrentPassword}
+              secureTextEntry
+              style={styles.progressInput}
+            />
+            <TextInput
+              accessibilityLabel="New password"
+              placeholder="New password (at least 14 characters)"
+              value={newPassword}
+              onChangeText={setNewPassword}
+              secureTextEntry
+              style={styles.progressInput}
+            />
+            <Pressable
+              accessibilityRole="button"
+              disabled={passwordSaving || !currentPassword || newPassword.length < 14}
+              onPress={() => void changeCoachPassword()}
+              style={[
+                styles.primaryButton,
+                (passwordSaving || !currentPassword || newPassword.length < 14) && styles.disabled,
+              ]}
+            >
+              <Text style={styles.primaryButtonText}>
+                {passwordSaving ? "Updating…" : "Update password"}
+              </Text>
+            </Pressable>
+          </View>
           <Text style={styles.profileNote}>
-            Your academy administrator manages coach contact details and account access.
+            Contact your academy administrator if your email or account access needs to change.
           </Text>
           <Pressable accessibilityRole="button" onPress={onLogout} style={styles.logoutButton}>
             <Text style={styles.logoutLabel}>Sign out</Text>
@@ -888,24 +1329,227 @@ export function CoachWorkspace({
         </>
       );
     }
-    if (tab === "attendance" && selected) return renderRoster();
-    if (tab === "attendance") {
+    if (tab === "classes" && selected) return renderRoster();
+    if (tab === "classes")
       return (
         <>
+          <View style={styles.sectionHeading}>
+            <Text style={styles.sectionTitle}>Your classes</Text>
+            <Text style={styles.supporting}>{availableSessions.length} scheduled and past</Text>
+          </View>
+          <View style={styles.classFilter}>
+            {(["upcoming", "history"] as const).map((view) => (
+              <Pressable
+                key={view}
+                accessibilityRole="button"
+                accessibilityState={{ selected: classView === view }}
+                onPress={() => setClassView(view)}
+                style={[styles.classFilterOption, classView === view && styles.classFilterOptionActive]}
+              >
+                <Text style={[styles.classFilterText, classView === view && styles.classFilterTextActive]}>
+                  {view === "upcoming" ? "Upcoming" : "Class history"}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
           {renderSessionList(
-            availableSessions.filter((session) => session.status === "scheduled"),
-            "You have no upcoming classes that need attendance.",
+            availableSessions.filter((session) =>
+              classView === "upcoming" ? session.status === "scheduled" : session.status !== "scheduled",
+            ),
+            classView === "upcoming" ? "Your next assigned classes will appear here." : "Completed class history will appear here.",
           )}
+          {!loading && classView === "history" ? (
+            <Pressable
+              accessibilityRole="button"
+              disabled={refreshing}
+              onPress={() => void loadOlderSessions()}
+              style={styles.textButton}
+            >
+              <Text style={styles.textButtonLabel}>
+                {refreshing ? "Loading…" : "Load earlier history"}
+              </Text>
+            </Pressable>
+          ) : null}
         </>
       );
-    }
-    if (tab === "classes")
-      return renderSessionList(
-        availableSessions,
-        "Your upcoming classes will appear here when the academy schedules them.",
-      );
     if (tab === "students") {
+      if (selectedStudent) {
+        const attendanceTotal = studentHistory?.attendance.length ?? 0;
+        const presentCount =
+          studentHistory?.attendance.filter(
+            (item) => item.status === "present" || item.status === "late",
+          ).length ?? 0;
+        return (
+          <>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                setSelectedStudent(null);
+                setStudentHistory(null);
+              }}
+              style={styles.backButton}
+            >
+              <Text style={styles.backLabel}>‹ All students</Text>
+            </Pressable>
+            <View style={styles.detailHeader}>
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>
+                  {selectedStudent.studentName.slice(0, 1).toUpperCase()}
+                </Text>
+              </View>
+              <Text style={styles.pageTitle}>{selectedStudent.studentName}</Text>
+              <Text style={styles.supporting}>
+                {selectedStudent.batches.map((batch) => batch.name).join(" · ")}
+              </Text>
+            </View>
+            {studentFeedbackLoading ? (
+              <ActivityIndicator style={styles.loader} color={colors.brand} />
+            ) : null}
+            {!studentFeedbackLoading && !studentHistory ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => void openStudent(selectedStudent)}
+                style={styles.textButton}
+              >
+                <Text style={styles.textButtonLabel}>Retry student details</Text>
+              </Pressable>
+            ) : null}
+            {studentHistory ? (
+              <>
+                <View style={styles.historySummary}>
+                  <Text style={styles.sectionTitle}>Attendance</Text>
+                  <Text style={styles.historyMetric}>
+                    {presentCount}/{attendanceTotal} present or late
+                  </Text>
+                  <Text style={styles.supporting}>Across recorded classes</Text>
+                </View>
+                <View style={styles.historyCard}>
+                  <Text style={styles.sectionTitle}>Recent classes</Text>
+                  {studentHistory.attendance.slice(0, 8).map((entry) => (
+                    <View key={entry.id} style={styles.historyRow}>
+                      <View>
+                        <Text style={styles.studentName}>{entry.batchName}</Text>
+                        <Text style={styles.supporting}>
+                          {formatDate(entry.scheduledStart, timeZone)}
+                        </Text>
+                      </View>
+                      <Text style={styles.historyStatus}>{statusLabels[entry.status]}</Text>
+                    </View>
+                  ))}
+                  {!studentHistory.attendance.length ? (
+                    <Text style={styles.supporting}>No attendance has been recorded.</Text>
+                  ) : null}
+                </View>
+                <View style={styles.historyCard}>
+                  <Text style={styles.sectionTitle}>Progress assessments</Text>
+                  {studentHistory.progress.slice(0, 6).map((entry) => (
+                    <View key={entry.id} style={styles.historyRow}>
+                      <View style={styles.studentListMain}>
+                        <Text style={styles.studentName}>{entry.assessmentName}</Text>
+                        <Text style={styles.supporting}>
+                          {entry.value || entry.coachNote || "Progress note"}
+                        </Text>
+                      </View>
+                      <Text style={styles.supporting}>{formatDate(entry.createdAt, timeZone)}</Text>
+                    </View>
+                  ))}
+                  {!studentHistory.progress.length ? (
+                    <Text style={styles.supporting}>No assessments have been recorded.</Text>
+                  ) : null}
+                </View>
+              </>
+            ) : null}
+            <View style={styles.historyCard}>
+              <Text style={styles.sectionTitle}>
+                Weekly feedback · week of{" "}
+                {formatDate(`${currentWeekStart(timeZone)}T12:00:00.000Z`, timeZone)}
+              </Text>
+              <Text style={styles.formLabel}>Performance and effort</Text>
+              <TextInput
+                accessibilityLabel="Weekly performance feedback"
+                placeholder="What went well this week?"
+                value={feedbackPerformance}
+                onChangeText={setFeedbackPerformance}
+                multiline
+                style={[styles.progressInput, styles.progressNote]}
+                maxLength={1200}
+              />
+              <Text style={styles.formLabel}>Next steps and guidance</Text>
+              <TextInput
+                accessibilityLabel="Weekly guidance"
+                placeholder="What should the student focus on next?"
+                value={feedbackGuidance}
+                onChangeText={setFeedbackGuidance}
+                multiline
+                style={[styles.progressInput, styles.progressNote]}
+                maxLength={1200}
+              />
+              <Pressable
+                accessibilityRole="button"
+                disabled={feedbackSaving || !feedbackPerformance.trim()}
+                onPress={() => void saveWeeklyFeedback()}
+                style={[
+                  styles.primaryButton,
+                  (feedbackSaving || !feedbackPerformance.trim()) && styles.disabled,
+                ]}
+              >
+                <Text style={styles.primaryButtonText}>
+                  {feedbackSaving ? "Saving…" : "Save this week’s feedback"}
+                </Text>
+              </Pressable>
+            </View>
+            <View style={styles.historyCard}>
+              <Text style={styles.sectionTitle}>Past weekly feedback</Text>
+              {studentFeedback
+                .filter((entry) => entry.weekOf !== currentWeekStart(timeZone))
+                .map((entry) => (
+                  <View key={entry.id} style={styles.feedbackHistory}>
+                    <Text style={styles.formLabel}>
+                      Week of {formatDate(`${entry.weekOf}T12:00:00.000Z`, timeZone)}
+                    </Text>
+                    <Text style={styles.supporting}>{entry.performance}</Text>
+                    {entry.guidance ? (
+                      <Text style={styles.feedbackGuidance}>{entry.guidance}</Text>
+                    ) : null}
+                  </View>
+                ))}
+              {!studentFeedback.some((entry) => entry.weekOf !== currentWeekStart(timeZone)) ? (
+                <Text style={styles.supporting}>Your weekly notes will build a history here.</Text>
+              ) : null}
+            </View>
+          </>
+        );
+      }
       if (studentsLoading) return <ActivityIndicator style={styles.loader} color={colors.brand} />;
+      if (error && !students.length)
+        return (
+          <>
+            <Text style={styles.error}>{error}</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                setError(null);
+                setStudentsLoading(true);
+                void requestMobileData(
+                  "/coach/me/students",
+                  (value) => z.object({ students: CoachStudentSchema.array() }).parse(value),
+                  auth,
+                  onAuthUpdate,
+                )
+                  .then((result) => setStudents(result.students))
+                  .catch((caught) =>
+                    setError(
+                      caught instanceof Error ? caught.message : "Could not load your students.",
+                    ),
+                  )
+                  .finally(() => setStudentsLoading(false));
+              }}
+              style={styles.textButton}
+            >
+              <Text style={styles.textButtonLabel}>Retry students</Text>
+            </Pressable>
+          </>
+        );
       if (!students.length)
         return (
           <EmptyState
@@ -920,8 +1564,10 @@ export function CoachWorkspace({
           </Text>
           <View style={styles.studentsCard}>
             {students.map((student, index) => (
-              <View
+              <Pressable
                 key={student.studentId}
+                accessibilityRole="button"
+                onPress={() => void openStudent(student)}
                 style={[styles.studentListRow, index > 0 && styles.divider]}
               >
                 <View style={styles.avatarSmall}>
@@ -935,7 +1581,7 @@ export function CoachWorkspace({
                     {student.batches.map((batch) => batch.name).join(" · ")}
                   </Text>
                 </View>
-              </View>
+              </Pressable>
             ))}
           </View>
         </>
@@ -957,21 +1603,62 @@ export function CoachWorkspace({
                 })}
               </Text>
             </View>
-            <Text style={styles.summaryCount}>
-              {completedToday}/{todaysSessions.length}
-            </Text>
+            <View style={styles.summaryCountBadge}>
+              <Text style={styles.summaryCount}>{completedToday}</Text>
+              <Text style={styles.summaryCountTotal}>/{todaysSessions.length}</Text>
+            </View>
           </View>
           <Text style={styles.summaryCaption}>
             {todaysSessions.length ? "Classes completed" : "No classes on your schedule today"}
           </Text>
         </View>
+        {nextTodaySession ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => void openSession(nextTodaySession)}
+            style={({ pressed }) => [styles.nextClassCard, pressed && styles.pressed]}
+          >
+            <View style={styles.nextClassTop}>
+              <View style={styles.nextClassTag}>
+                <View style={styles.nextClassDot} />
+                <Text style={styles.nextClassTagText}>
+                  {new Date(nextTodaySession.endsAt).getTime() <= Date.now()
+                    ? "ATTENDANCE DUE"
+                    : new Date(nextTodaySession.startsAt).getTime() > Date.now()
+                      ? "UP NEXT"
+                      : "IN PROGRESS"}
+                </Text>
+              </View>
+              <WorkspaceIcon name="calendar" color={colors.brand} size={19} />
+            </View>
+            <Text style={styles.nextClassName}>{nextTodaySession.batchName}</Text>
+            <Text style={styles.nextClassMeta}>
+              {formatTime(nextTodaySession.startsAt, timeZone)} – {formatTime(nextTodaySession.endsAt, timeZone)}
+            </Text>
+            <Text style={styles.nextClassMeta}>
+              {[nextTodaySession.branchName, nextTodaySession.venue].filter(Boolean).join(" · ") || "Location to be confirmed"}
+            </Text>
+            <View style={styles.nextClassActionRow}>
+              <Text style={styles.nextClassAction}>Open class</Text>
+              <Text style={styles.nextClassArrow}>›</Text>
+            </View>
+          </Pressable>
+        ) : null}
         <View style={styles.sectionHeading}>
           <Text style={styles.sectionTitle}>Today’s classes</Text>
           <Pressable accessibilityRole="button" onPress={() => setTab("classes")}>
             <Text style={styles.linkText}>All classes</Text>
           </Pressable>
         </View>
-        {renderSessionList(todaysSessions, "Your next assigned classes are available in Classes.")}
+        {todaysSessions.some((session) => session.id !== nextTodaySession?.id)
+          ? renderSessionList(
+              todaysSessions.filter((session) => session.id !== nextTodaySession?.id),
+              "Your next assigned classes are available in Classes.",
+            )
+          : null}
+        {!todaysSessions.length && !loading ? (
+          <EmptyState title="A clear day ahead" detail="You have no classes scheduled today." />
+        ) : null}
         <View style={styles.sectionHeading}>
           <Text style={styles.sectionTitle}>Academy notices</Text>
           <Pressable accessibilityRole="button" onPress={() => setTab("notices")}>
@@ -1007,22 +1694,20 @@ export function CoachWorkspace({
   const pageTitle =
     tab === "today"
       ? `Hello, ${firstName}.`
-      : tab === "attendance"
+      : tab === "classes"
         ? selected
-          ? "Take attendance"
-          : "Attendance"
-        : tab === "classes"
-          ? "My classes"
-          : tab === "students"
-            ? "My students"
-            : tab === "profile"
-              ? "Profile"
-              : "Academy notices";
+          ? "Class details"
+          : "My classes"
+        : tab === "students"
+          ? "My students"
+          : tab === "profile"
+            ? "Profile"
+            : "Academy notices";
   const pageSubtitle =
     tab === "today"
       ? "Your classes and tasks for the day."
-      : tab === "attendance" && selected
-        ? "Mark each student’s attendance for this class."
+      : tab === "classes" && selected && selected.status === "scheduled"
+        ? "Mark attendance and record progress for this class."
         : tab === "profile"
           ? "Your coach account."
           : auth.user.academyName;
@@ -1047,7 +1732,7 @@ export function CoachWorkspace({
           onPress={() => setTab(tab === "notices" ? "today" : "notices")}
           style={[styles.bellButton, tab === "notices" && styles.bellButtonActive]}
         >
-          <Text style={[styles.bellIcon, tab === "notices" && styles.bellIconActive]}>♢</Text>
+          <WorkspaceIcon name="bell" color={tab === "notices" ? colors.brand : colors.muted} />
           {unreadCount > 0 ? <View style={styles.unreadDot} /> : null}
         </Pressable>
       </View>
@@ -1073,7 +1758,9 @@ export function CoachWorkspace({
                 to sync
               </Text>
               <Text style={styles.queueDetail}>
-                Attendance is encrypted on this device and will retry when the app is active.
+                {Platform.OS === "web"
+                  ? "Saved in this browser session; syncing when the app is active."
+                  : "Encrypted on this device; syncing when the app is active."}
               </Text>
               {queuedAttendance.map((item) => (
                 <Text key={item.sessionId} style={styles.queueDetail}>
@@ -1118,7 +1805,7 @@ export function CoachWorkspace({
               style={styles.navButton}
             >
               <View style={[styles.navIconWrap, active && styles.navIconWrapActive]}>
-                <Text style={[styles.navIcon, active && styles.navIconActive]}>{item.icon}</Text>
+                <WorkspaceIcon name={coachIconByTab[item.id]} color={active ? colors.brand : colors.muted} size={20} />
               </View>
               <Text style={[styles.navLabel, active && styles.navLabelActive]}>{item.label}</Text>
             </Pressable>
@@ -1164,8 +1851,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.subtle,
   },
   bellButtonActive: { backgroundColor: colors.brandSoft },
-  bellIcon: { color: colors.text, fontSize: 23 },
-  bellIconActive: { color: colors.brand },
   unreadDot: {
     position: "absolute",
     top: 8,
@@ -1177,7 +1862,7 @@ const styles = StyleSheet.create({
     borderColor: colors.surface,
     backgroundColor: colors.danger,
   },
-  content: { flexGrow: 1, paddingHorizontal: 20, paddingTop: 24, paddingBottom: 28 },
+  content: { flexGrow: 1, paddingHorizontal: 18, paddingTop: 21, paddingBottom: 28 },
   pageHeading: { marginBottom: 19 },
   pageTitle: {
     color: colors.ink,
@@ -1208,12 +1893,24 @@ const styles = StyleSheet.create({
     backgroundColor: "#92400E",
   },
   syncButtonText: { color: colors.surface, fontSize: 12, fontWeight: "700" },
-  todaySummary: { padding: 17, borderRadius: 16, backgroundColor: colors.ink },
+  todaySummary: { padding: 17, borderRadius: 20, borderWidth: 1, borderColor: "#DBEADF", backgroundColor: "#EAF3EB" },
   summaryTopline: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  summaryLabel: { color: "#D1D5DB", fontSize: 10, fontWeight: "700", letterSpacing: 1 },
-  summaryDate: { marginTop: 5, color: colors.surface, fontSize: 17, fontWeight: "700" },
-  summaryCount: { color: colors.surface, fontSize: 25, fontWeight: "700" },
-  summaryCaption: { marginTop: 10, color: "#D1D5DB", fontSize: 12 },
+  summaryLabel: { color: colors.brand, fontSize: 10, fontWeight: "800", letterSpacing: 1.2 },
+  summaryDate: { marginTop: 5, color: colors.ink, fontSize: 17, fontWeight: "700" },
+  summaryCount: { color: colors.brand, fontSize: 22, fontWeight: "800" },
+  summaryCountBadge: { flexDirection: "row", alignItems: "baseline" },
+  summaryCountTotal: { color: colors.muted, fontSize: 13, fontWeight: "600" },
+  summaryCaption: { marginTop: 10, color: colors.text, fontSize: 12 },
+  nextClassCard: { marginTop: 12, padding: 17, borderRadius: 20, borderWidth: 1, borderColor: "#E7E8D9", backgroundColor: "#FFFDF4" },
+  nextClassTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  nextClassTag: { flexDirection: "row", alignItems: "center", gap: 7 },
+  nextClassDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.coral },
+  nextClassTagText: { color: colors.warning, fontSize: 10, fontWeight: "800", letterSpacing: 1 },
+  nextClassName: { marginTop: 13, color: colors.ink, fontSize: 20, fontWeight: "700", letterSpacing: -0.3 },
+  nextClassMeta: { marginTop: 5, color: colors.text, fontSize: 12, lineHeight: 17 },
+  nextClassActionRow: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: "#EEEBDD", flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  nextClassAction: { color: colors.brand, fontSize: 13, fontWeight: "700" },
+  nextClassArrow: { color: colors.brand, fontSize: 21, lineHeight: 22 },
   sectionHeading: {
     marginTop: 24,
     marginBottom: 11,
@@ -1223,13 +1920,18 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { color: colors.ink, fontSize: 17, fontWeight: "700" },
   linkText: { color: colors.brand, fontSize: 12, fontWeight: "600" },
+  classFilter: { flexDirection: "row", gap: 7, padding: 4, marginBottom: 13, borderRadius: 13, backgroundColor: "#E9EEEA" },
+  classFilterOption: { flex: 1, alignItems: "center", justifyContent: "center", minHeight: 36, paddingHorizontal: 10, borderRadius: 10 },
+  classFilterOptionActive: { backgroundColor: colors.surface, shadowColor: "#24483D", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 3, elevation: 1 },
+  classFilterText: { color: colors.muted, fontSize: 12, fontWeight: "600" },
+  classFilterTextActive: { color: colors.ink, fontWeight: "700" },
   sessionCard: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
     marginBottom: 9,
     padding: 14,
-    borderRadius: 14,
+    borderRadius: 17,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
@@ -1263,6 +1965,21 @@ const styles = StyleSheet.create({
   },
   presenceButtonText: { color: colors.brand, fontSize: 12, fontWeight: "700" },
   sessionState: { marginTop: 5, color: colors.brand, fontSize: 10, fontWeight: "600" },
+  workflowCard: { marginBottom: 15, paddingHorizontal: 15, paddingVertical: 13, borderRadius: 17, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  workflowStep: { flexDirection: "row", alignItems: "center", gap: 11, minHeight: 43 },
+  workflowRule: { marginLeft: 13, height: 13, borderLeftWidth: 1, borderColor: colors.border },
+  workflowNumber: { width: 27, height: 27, borderRadius: 14, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center", backgroundColor: colors.canvas },
+  workflowNumberText: { color: colors.muted, fontSize: 11, fontWeight: "700" },
+  workflowDone: { borderColor: "#B7D8C3", backgroundColor: colors.successSoft },
+  workflowDoneText: { color: colors.success },
+  workflowCurrent: { borderColor: "#C9E3D3", backgroundColor: colors.brandSoft },
+  workflowCurrentText: { color: colors.brand },
+  workflowCopy: { flex: 1 },
+  workflowTitle: { color: colors.ink, fontSize: 12, fontWeight: "700" },
+  workflowDetail: { marginTop: 2, color: colors.muted, fontSize: 11 },
+  attendanceHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 4, marginBottom: 9 },
+  markAllButton: { paddingHorizontal: 11, paddingVertical: 8, borderRadius: 10, backgroundColor: colors.brandSoft },
+  markAllLabel: { color: colors.brand, fontSize: 11, fontWeight: "700" },
   completedText: { color: colors.success },
   cancelledText: { color: colors.muted },
   chevron: { color: colors.muted, fontSize: 21 },
@@ -1277,7 +1994,7 @@ const styles = StyleSheet.create({
   noticeCard: {
     marginBottom: 10,
     padding: 15,
-    borderRadius: 14,
+    borderRadius: 17,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
@@ -1362,11 +2079,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brand,
   },
   primaryButtonText: { color: colors.surface, fontSize: 14, fontWeight: "700" },
+  finishHint: { marginTop: 8, color: colors.muted, fontSize: 11, lineHeight: 16, textAlign: "center" },
   disabled: { opacity: 0.55 },
   profileCard: {
     alignItems: "center",
     padding: 22,
-    borderRadius: 16,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
@@ -1390,6 +2108,43 @@ const styles = StyleSheet.create({
   },
   avatarSmallText: { color: colors.brand, fontSize: 15, fontWeight: "700" },
   studentListMain: { flex: 1 },
+  profileForm: {
+    marginTop: 12,
+    padding: 15,
+    gap: 9,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  formLabel: { marginTop: 4, color: colors.text, fontSize: 12, fontWeight: "700" },
+  historySummary: {
+    marginBottom: 11,
+    padding: 15,
+    borderRadius: 14,
+    backgroundColor: colors.brandSoft,
+  },
+  historyMetric: { marginTop: 7, color: colors.brand, fontSize: 21, fontWeight: "700" },
+  historyCard: {
+    marginBottom: 11,
+    padding: 15,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  historyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  historyStatus: { color: colors.brand, fontSize: 11, fontWeight: "700" },
+  feedbackHistory: { paddingVertical: 10, borderTopWidth: 1, borderTopColor: colors.border },
+  feedbackGuidance: { marginTop: 6, color: colors.text, fontSize: 12, lineHeight: 18 },
   avatar: {
     width: 58,
     height: 58,
@@ -1471,8 +2226,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   navIconWrapActive: { backgroundColor: colors.brandSoft },
-  navIcon: { color: colors.muted, fontSize: 18, lineHeight: 21, fontWeight: "600" },
-  navIconActive: { color: colors.brand },
   navLabel: { color: colors.muted, fontSize: 10, fontWeight: "500" },
   navLabelActive: { color: colors.brand, fontWeight: "700" },
 } as const);

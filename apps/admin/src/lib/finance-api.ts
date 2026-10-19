@@ -5,6 +5,7 @@ import {
   ExpenseListSchema,
   FeeChargeListSchema,
   FinanceSummarySchema,
+  FinanceStudentListSchema,
   RecordFeePaymentRequestSchema,
   RefundFeePaymentRequestSchema,
   UpdatedRecordSchema,
@@ -70,6 +71,19 @@ export function getFinanceSummary(
 ) {
   const params = new URLSearchParams(range);
   return requestData(`/finance/summary?${params.toString()}`, FinanceSummarySchema, token, refresh);
+}
+
+export function getFinanceStudents(
+  token: string,
+  refresh: RefreshSession,
+  query: { search?: string; offset: number; limit: number },
+) {
+  const params = new URLSearchParams({
+    offset: String(query.offset),
+    limit: String(query.limit),
+    ...(query.search ? { search: query.search } : {}),
+  });
+  return requestData(`/finance/students?${params.toString()}`, FinanceStudentListSchema, token, refresh);
 }
 
 export function getFeeCharges(token: string, refresh: RefreshSession, query: FeeChargeQuery) {

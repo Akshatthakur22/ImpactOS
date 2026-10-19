@@ -143,10 +143,29 @@ describe("Phase 1 operations API", () => {
       .send({ batchId, dayOfWeek: 1, startTime: "25:00", endTime: "26:00" });
     expect(invalidSchedule.status).toBe(400);
 
+    const branch = await request(app)
+      .post("/api/v1/branches")
+      .set("Authorization", "Bearer owner-token")
+      .send({
+        name: "Main branch",
+        address: "Academy grounds",
+        geofenceLatitude: 28.6139,
+        geofenceLongitude: 77.209,
+        geofenceRadiusMeters: 150,
+      });
+    expect(branch.status).toBe(201);
+
     const schedule = await request(app)
       .post("/api/v1/schedules")
       .set("Authorization", "Bearer owner-token")
-      .send({ batchId, dayOfWeek: 1, startTime: "09:00", endTime: "10:00", venue: "Main hall" });
+      .send({
+        batchId,
+        branchId: branch.body.data.id,
+        dayOfWeek: 1,
+        startTime: "09:00",
+        endTime: "10:00",
+        venue: "Main hall",
+      });
     expect(schedule.status).toBe(201);
 
     const session = await request(app)
@@ -191,7 +210,8 @@ describe("Phase 1 operations API", () => {
     operationNow = new Date("2026-10-19T07:59:00.000Z");
     const tooEarlyCheckIn = await request(app)
       .post(`/api/v1/coach/sessions/${session.body.data.id}/check-in`)
-      .set("Authorization", "Bearer coach-token");
+      .set("Authorization", "Bearer coach-token")
+      .send({ latitude: 28.6139, longitude: 77.209, accuracyMeters: 8 });
     expect(tooEarlyCheckIn.status).toBe(409);
     expect(tooEarlyCheckIn.body.error.code).toBe("SESSION_NOT_OPEN");
 
@@ -205,7 +225,8 @@ describe("Phase 1 operations API", () => {
     operationNow = new Date("2026-10-19T09:15:00.000Z");
     const checkIn = await request(app)
       .post(`/api/v1/coach/sessions/${session.body.data.id}/check-in`)
-      .set("Authorization", "Bearer coach-token");
+      .set("Authorization", "Bearer coach-token")
+      .send({ latitude: 28.6139, longitude: 77.209, accuracyMeters: 8 });
     expect(checkIn.status).toBe(200);
     expect(checkIn.body.data).toEqual({
       checkedInAt: "2026-10-19T09:15:00.000Z",
@@ -213,7 +234,8 @@ describe("Phase 1 operations API", () => {
     });
     const repeatedCheckIn = await request(app)
       .post(`/api/v1/coach/sessions/${session.body.data.id}/check-in`)
-      .set("Authorization", "Bearer coach-token");
+      .set("Authorization", "Bearer coach-token")
+      .send({ latitude: 28.6139, longitude: 77.209, accuracyMeters: 8 });
     expect(repeatedCheckIn.body.data.checkedInAt).toBe("2026-10-19T09:15:00.000Z");
 
     const progressEntry = await request(app)
@@ -320,6 +342,68 @@ describe("Phase 1 operations API", () => {
       .set("Authorization", "Bearer coach-token");
     expect(completed.status).toBe(200);
     expect(completed.body.data.status).toBe("completed");
+    const completedRoster = await request(app)
+      .get(`/api/v1/coach/sessions/${session.body.data.id}/roster`)
+      .set("Authorization", "Bearer coach-token");
+    expect(completedRoster.status).toBe(200);
+    expect(completedRoster.body.data.students).toHaveLength(2);
+    expect(
+      completedRoster.body.data.students.every(
+        (student: { status: string | null }) => student.status,
+      ),
+    ).toBe(true);
+
+    const coachHistory = await request(app)
+      .get(`/api/v1/coach/students/${studentId}/history`)
+      .set("Authorization", "Bearer coach-token");
+    expect(coachHistory.status).toBe(200);
+    expect(coachHistory.body.data.attendance).toHaveLength(1);
+    expect(coachHistory.body.data.progress).toHaveLength(1);
+
+    const weeklyFeedback = await request(app)
+      .put(`/api/v1/coach/students/${studentId}/feedback`)
+      .set("Authorization", "Bearer coach-token")
+      .send({
+        weekOf: "2026-10-19",
+        performance: "Strong focus and footwork.",
+        guidance: "Practice balance drills.",
+      });
+    expect(weeklyFeedback.status).toBe(200);
+    expect(weeklyFeedback.body.data).toMatchObject({
+      studentId,
+      weekOf: "2026-10-19",
+      performance: "Strong focus and footwork.",
+      guidance: "Practice balance drills.",
+    });
+    const revisedFeedback = await request(app)
+      .put(`/api/v1/coach/students/${studentId}/feedback`)
+      .set("Authorization", "Bearer coach-token")
+      .send({
+        weekOf: "2026-10-19",
+        performance: "Strong focus, footwork, and speed.",
+        guidance: "Continue balance drills.",
+      });
+    expect(revisedFeedback.status).toBe(200);
+    const feedbackHistory = await request(app)
+      .get(`/api/v1/coach/students/${studentId}/feedback`)
+      .set("Authorization", "Bearer coach-token");
+    expect(feedbackHistory.body.data.entries).toHaveLength(1);
+    expect(feedbackHistory.body.data.entries[0].performance).toBe(
+      "Strong focus, footwork, and speed.",
+    );
+    const ownerCannotReadCoachHistory = await request(app)
+      .get(`/api/v1/coach/students/${studentId}/history`)
+      .set("Authorization", "Bearer owner-token");
+    expect(ownerCannotReadCoachHistory.status).toBe(403);
+    const coachProfile = await request(app)
+      .put("/api/v1/coach/me/profile")
+      .set("Authorization", "Bearer coach-token")
+      .send({ displayName: "Coach Priya Rao" });
+    expect(coachProfile.status).toBe(200);
+    expect(coachProfile.body.data).toMatchObject({
+      displayName: "Coach Priya Rao",
+      email: "priya@impactfit.example",
+    });
 
     const afterCompletion = await request(app)
       .put(`/api/v1/coach/sessions/${session.body.data.id}/attendance`)
@@ -376,7 +460,7 @@ describe("Phase 1 operations API", () => {
     expect(attendanceQueue.body.data.sessions[0]).toMatchObject({
       expectedCount: 2,
       markedCount: 0,
-      coachPresence: [{ coachName: "Coach Priya", checkedInAt: null, checkedOutAt: null }],
+      coachPresence: [{ coachName: "Coach Priya Rao", checkedInAt: null, checkedOutAt: null }],
     });
 
     const moved = await request(app)

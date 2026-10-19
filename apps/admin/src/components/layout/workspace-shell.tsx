@@ -13,6 +13,7 @@ const navigation: Array<{
   group: string;
   matches: string[];
   permission?: Permission;
+  permissions?: Permission[];
   ownerOnly?: boolean;
 }> = [
   {
@@ -48,21 +49,21 @@ const navigation: Array<{
     label: "Academy operations",
     group: "Operations",
     matches: ["/operations"],
-    permission: "schedules:read",
+    permissions: ["schedules:read", "attendance:read", "settings:manage", "students:read"],
   },
   {
     href: "/finance",
     label: "Finance",
     group: "Finance & insight",
     matches: ["/finance", "/fees", "/expenses"],
-    permission: "payments:read",
+    permissions: ["payments:read", "expenses:manage"],
   },
   {
     href: "/analytics",
     label: "Analytics",
     group: "Finance & insight",
     matches: ["/analytics"],
-    permission: "admin:dashboard:read",
+    permission: "reports:read",
   },
   {
     href: "/notices",
@@ -98,7 +99,8 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
   const visibleNavigation = navigation.filter(
     (item) =>
       user?.role === "owner" ||
-      (!item.ownerOnly && item.permission && user?.permissions?.includes(item.permission)),
+      (!item.ownerOnly && (item.permission ? user?.permissions?.includes(item.permission) : false)) ||
+      (!item.ownerOnly && (item.permissions?.some((permission) => user?.permissions?.includes(permission)) ?? false)),
   );
   const primaryMobileNavigation = visibleNavigation.slice(0, 5);
   const secondaryMobileNavigation = visibleNavigation.slice(5);

@@ -8,12 +8,13 @@ import {
   FinanceDateRangeQuerySchema,
   RecordFeePaymentRequestSchema,
   RefundFeePaymentRequestSchema,
+  StudentDirectoryQuerySchema,
   VoidExpenseRequestSchema,
   VoidFeeChargeRequestSchema,
 } from "@sportdesk/contracts";
 import type { SportDeskAuthService } from "../auth/auth.service.js";
 import { AuthError } from "../auth/auth.service.js";
-import { authenticatedUser, requirePermission } from "../auth/authorization.js";
+import { authenticatedUser, requireAnyPermission, requirePermission } from "../auth/authorization.js";
 import type { SportDeskFinanceService } from "./finance.service.js";
 
 export function createFinanceRouter(options: {
@@ -22,8 +23,14 @@ export function createFinanceRouter(options: {
 }): Router {
   const router = Router();
 
-  router.get("/finance/summary", async (request, response) => {
+  router.get("/finance/students", async (request, response) => {
     const user = await requirePermission(request, options.auth, "payments:read");
+    const query = StudentDirectoryQuerySchema.parse(request.query);
+    response.status(200).json({ data: await options.finance.listStudentOptions(user.academyId, query) });
+  });
+
+  router.get("/finance/summary", async (request, response) => {
+    const user = await requireAnyPermission(request, options.auth, ["payments:read", "reports:read"]);
     const range = FinanceDateRangeQuerySchema.parse(request.query);
     response.status(200).json({ data: await options.finance.getSummary(user.academyId, range) });
   });

@@ -67,7 +67,35 @@ test("owner signs in and registers a student into an academy batch", async ({ pa
       await route.fulfill({
         status: 200,
         headers: corsHeaders(),
-        body: JSON.stringify({ data: { academyName: owner.academyName, user: owner } }),
+        body: JSON.stringify({
+          data: {
+            academyName: owner.academyName,
+            user: owner,
+            timezone: "Asia/Kolkata",
+            metrics: {
+              activeStudents: students.length,
+              pendingStudents: 0,
+              activeCoaches: 1,
+              activePrograms: 1,
+              activeBatches: 1,
+              sessionsToday: 0,
+              scheduledSessionsToday: 0,
+              completedSessionsToday: 0,
+              cancelledSessionsToday: 0,
+              attendanceToday: {
+                expected: 0,
+                marked: 0,
+                present: 0,
+                absent: 0,
+                late: 0,
+                excused: 0,
+                toRecord: 0,
+              },
+            },
+            todaySessions: [],
+            recentAttendance: [],
+          },
+        }),
       });
       return;
     }
@@ -181,9 +209,9 @@ test("owner signs in and registers a student into an academy batch", async ({ pa
   await page.getByLabel("Password").fill("synthetic-local-password");
   await page.getByRole("button", { name: "Sign in" }).click();
 
-  await expect(page.getByRole("heading", { name: "Good to have you back, Impact." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Welcome, Impact" })).toBeVisible();
   await expect(page.getByText("Impact Fit Academy").first()).toBeVisible();
-  await expect(page.getByText("Not yet enabled")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Active students" })).toBeVisible();
   expect(loginPayload).toEqual({
     email: owner.email,
     password: "synthetic-local-password",
@@ -192,7 +220,7 @@ test("owner signs in and registers a student into an academy batch", async ({ pa
   expect(await page.evaluate(() => Object.keys(localStorage))).toEqual([]);
   expect(await page.evaluate(() => Object.keys(sessionStorage))).toEqual([]);
 
-  await page.getByRole("link", { name: "Students" }).click();
+  await page.getByRole("link", { name: "Students", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Students & guardians" })).toBeVisible();
   await page.getByLabel("First name").fill("Aarav");
   await page.getByLabel("Last name").fill("Mehta");
@@ -203,7 +231,7 @@ test("owner signs in and registers a student into an academy batch", async ({ pa
   await expect(
     page.getByRole("row", { name: /Aarav Mehta.*Nisha Mehta.*Morning group/ }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Create parent invite" }).click();
+  await page.getByRole("button", { name: "Issue / reissue", exact: true }).click();
   await expect(page.getByText("Parent invite code")).toBeVisible();
   await expect(
     page.getByText("invite-token-for-browser-test-01234567890123456789012345"),

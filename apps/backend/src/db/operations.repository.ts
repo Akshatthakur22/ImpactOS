@@ -1,4 +1,17 @@
-import { and, asc, count, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 import type {
   CreateAcademyBranchRequest,
   UpdateAcademyBranchRequest,
@@ -36,7 +49,9 @@ export class OperationsRepositoryError extends Error {
       | "SESSION_NOT_RESCHEDULABLE"
       | "SESSION_NOT_OPEN"
       | "SESSION_NOT_STARTED"
-      | "COACH_NOT_CHECKED_IN",
+      | "COACH_NOT_CHECKED_IN"
+      | "BRANCH_LOCATION_NOT_CONFIGURED"
+      | "COACH_OUTSIDE_GEOFENCE",
   ) {
     super(code);
     this.name = "OperationsRepositoryError";
@@ -44,6 +59,19 @@ export class OperationsRepositoryError extends Error {
 }
 
 type AcademyContext = { academyId: string; createdBy: string };
+
+function distanceInMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const radians = (degrees: number) => (degrees * Math.PI) / 180;
+  const earthRadius = 6_371_000;
+  const deltaLatitude = radians(lat2 - lat1);
+  const deltaLongitude = radians(lon2 - lon1);
+  const a =
+    Math.sin(deltaLatitude / 2) ** 2 +
+    Math.cos(radians(lat1)) *
+      Math.cos(radians(lat2)) *
+      Math.sin(deltaLongitude / 2) ** 2;
+  return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
 export function createOperationsRepository(db: Database) {
   return {
@@ -53,6 +81,9 @@ export function createOperationsRepository(db: Database) {
           id: academyBranches.id,
           name: academyBranches.name,
           address: academyBranches.address,
+          geofenceLatitude: academyBranches.geofenceLatitude,
+          geofenceLongitude: academyBranches.geofenceLongitude,
+          geofenceRadiusMeters: academyBranches.geofenceRadiusMeters,
           isActive: academyBranches.isActive,
         })
         .from(academyBranches)
@@ -68,11 +99,17 @@ export function createOperationsRepository(db: Database) {
           createdBy: input.createdBy,
           name: input.name,
           address: input.address || null,
+          geofenceLatitude: input.geofenceLatitude ?? null,
+          geofenceLongitude: input.geofenceLongitude ?? null,
+          ...(input.geofenceRadiusMeters ? { geofenceRadiusMeters: input.geofenceRadiusMeters } : {}),
         })
         .returning({
           id: academyBranches.id,
           name: academyBranches.name,
           address: academyBranches.address,
+          geofenceLatitude: academyBranches.geofenceLatitude,
+          geofenceLongitude: academyBranches.geofenceLongitude,
+          geofenceRadiusMeters: academyBranches.geofenceRadiusMeters,
           isActive: academyBranches.isActive,
         });
       if (!branch) throw new Error("Branch insert returned no record.");
@@ -97,6 +134,9 @@ export function createOperationsRepository(db: Database) {
           id: academyBranches.id,
           name: academyBranches.name,
           address: academyBranches.address,
+          geofenceLatitude: academyBranches.geofenceLatitude,
+          geofenceLongitude: academyBranches.geofenceLongitude,
+          geofenceRadiusMeters: academyBranches.geofenceRadiusMeters,
           isActive: academyBranches.isActive,
         });
       if (!branch) throw new OperationsRepositoryError("RELATED_RECORD_NOT_FOUND");
@@ -385,7 +425,7 @@ export function createOperationsRepository(db: Database) {
       academyId: string,
       from: Date,
       to: Date,
-      filters: { batchId?: string; recordedBy?: string } = {},
+      filters: { batchId?: string; recordedBy?: string; sessionId?: string; offset?: number; limit?: number } = {},
     ) {
       const conditions = [
         eq(attendanceRecords.academyId, academyId),
@@ -394,7 +434,9 @@ export function createOperationsRepository(db: Database) {
       ];
       if (filters.batchId) conditions.push(eq(batches.id, filters.batchId));
       if (filters.recordedBy) conditions.push(eq(users.id, filters.recordedBy));
-      const records = await db
+      if (filters.sessionId) conditions.push(eq(trainingSessions.id, filters.sessionId));
+      const pageSize = filters.limit ?? 50;
+      const rows = await db
         .select({
           id: attendanceRecords.id,
           sessionId: trainingSessions.id,
@@ -414,8 +456,17 @@ export function createOperationsRepository(db: Database) {
         .innerJoin(batches, eq(trainingSessions.batchId, batches.id))
         .innerJoin(users, eq(attendanceRecords.recordedBy, users.id))
         .where(and(...conditions))
-        .orderBy(desc(trainingSessions.startsAt), asc(students.lastName), asc(students.firstName));
-      if (records.length === 0) return [];
+        .orderBy(
+          desc(trainingSessions.startsAt),
+          asc(students.lastName),
+          asc(students.firstName),
+          asc(attendanceRecords.id),
+        )
+        .limit(pageSize + 1)
+        .offset(filters.offset ?? 0);
+      const hasMore = rows.length > pageSize;
+      const records = rows.slice(0, pageSize);
+      if (records.length === 0) return { records: [], hasMore };
       const counts = await db
         .select({ attendanceId: attendanceCorrections.attendanceId, value: count() })
         .from(attendanceCorrections)
@@ -432,10 +483,10 @@ export function createOperationsRepository(db: Database) {
       const countByAttendanceId = new Map(
         counts.map((record) => [record.attendanceId, record.value]),
       );
-      return records.map((record) => ({
+      return { records: records.map((record) => ({
         ...record,
         correctionCount: countByAttendanceId.get(record.id) ?? 0,
-      }));
+      })), hasMore };
     },
 
     async listAttendanceSessions(academyId: string, from: Date, to: Date, batchId?: string) {
@@ -1053,6 +1104,27 @@ export function createOperationsRepository(db: Database) {
       return [...result.values()];
     },
 
+    async updateCoachSelfProfile(academyId: string, userId: string, displayName: string) {
+      const [activeCoach] = await db
+        .select({ id: coachProfiles.id })
+        .from(coachProfiles)
+        .where(
+          and(
+            eq(coachProfiles.academyId, academyId),
+            eq(coachProfiles.userId, userId),
+            eq(coachProfiles.status, "active"),
+          ),
+        )
+        .limit(1);
+      if (!activeCoach) return null;
+      const [updated] = await db
+        .update(users)
+        .set({ displayName, updatedAt: new Date() })
+        .where(and(eq(users.id, userId), eq(users.academyId, academyId), eq(users.role, "coach")))
+        .returning({ id: users.id, displayName: users.displayName, email: users.email });
+      return updated ?? null;
+    },
+
     async getSessionRoster(academyId: string, sessionId: string, userId: string) {
       const [session] = await db
         .select({
@@ -1103,8 +1175,17 @@ export function createOperationsRepository(db: Database) {
           lastName: students.lastName,
           status: attendanceRecords.status,
         })
-        .from(enrollments)
-        .innerJoin(students, eq(enrollments.studentId, students.id))
+        .from(students)
+        .leftJoin(
+          enrollments,
+          and(
+            eq(enrollments.studentId, students.id),
+            eq(enrollments.academyId, academyId),
+            eq(enrollments.batchId, session.batchId),
+            eq(enrollments.status, "active"),
+            eq(students.status, "active"),
+          ),
+        )
         .leftJoin(
           attendanceRecords,
           and(
@@ -1114,9 +1195,10 @@ export function createOperationsRepository(db: Database) {
         )
         .where(
           and(
-            eq(enrollments.academyId, academyId),
-            eq(enrollments.batchId, session.batchId),
-            eq(enrollments.status, "active"),
+            eq(students.academyId, academyId),
+            session.status === "completed"
+              ? isNotNull(attendanceRecords.id)
+              : or(isNotNull(enrollments.id), isNotNull(attendanceRecords.id)),
           ),
         )
         .orderBy(asc(students.lastName), asc(students.firstName));
@@ -1135,12 +1217,24 @@ export function createOperationsRepository(db: Database) {
       sessionId: string;
       userId: string;
       now: Date;
+      latitude: number;
+      longitude: number;
+      accuracyMeters: number;
     }) {
       return db.transaction(async (tx) => {
         const [session] = await tx
-          .select({ startsAt: trainingSessions.startsAt, status: trainingSessions.status })
+          .select({
+            startsAt: trainingSessions.startsAt,
+            status: trainingSessions.status,
+            scheduleId: trainingSessions.scheduleId,
+            geofenceLatitude: academyBranches.geofenceLatitude,
+            geofenceLongitude: academyBranches.geofenceLongitude,
+            geofenceRadiusMeters: academyBranches.geofenceRadiusMeters,
+          })
           .from(trainingSessions)
           .innerJoin(batches, eq(trainingSessions.batchId, batches.id))
+          .leftJoin(batchSchedules, eq(trainingSessions.scheduleId, batchSchedules.id))
+          .leftJoin(academyBranches, eq(batchSchedules.branchId, academyBranches.id))
           .innerJoin(
             batchCoaches,
             and(eq(batchCoaches.batchId, batches.id), eq(batchCoaches.academyId, input.academyId)),
@@ -1164,13 +1258,25 @@ export function createOperationsRepository(db: Database) {
           .limit(1);
         if (!session) throw new OperationsRepositoryError("COACH_NOT_ASSIGNED");
         if (session.status !== "scheduled") throw new OperationsRepositoryError("SESSION_CLOSED");
-        if (input.now.getTime() < session.startsAt.getTime() - 60 * 60_000) {
+        if (session.geofenceLatitude === null || session.geofenceLongitude === null)
+          throw new OperationsRepositoryError("BRANCH_LOCATION_NOT_CONFIGURED");
+        const distanceMeters = distanceInMeters(
+          input.latitude,
+          input.longitude,
+          session.geofenceLatitude,
+          session.geofenceLongitude,
+        );
+        if (distanceMeters > (session.geofenceRadiusMeters ?? 150) + 10)
+          throw new OperationsRepositoryError("COACH_OUTSIDE_GEOFENCE");
+        // Coaches can check in during the 15 minutes before a scheduled class.
+        if (input.now.getTime() < session.startsAt.getTime() - 15 * 60_000) {
           throw new OperationsRepositoryError("SESSION_NOT_OPEN");
         }
         const [existing] = await tx
           .select({
             checkedInAt: coachSessionPresence.checkedInAt,
             checkedOutAt: coachSessionPresence.checkedOutAt,
+            checkedInDistanceMeters: coachSessionPresence.checkedInDistanceMeters,
           })
           .from(coachSessionPresence)
           .where(
@@ -1189,10 +1295,15 @@ export function createOperationsRepository(db: Database) {
             sessionId: input.sessionId,
             coachId: input.userId,
             checkedInAt: input.now,
+            checkedInLatitude: input.latitude,
+            checkedInLongitude: input.longitude,
+            checkedInAccuracyMeters: input.accuracyMeters,
+            checkedInDistanceMeters: Math.round(distanceMeters),
           })
           .returning({
             checkedInAt: coachSessionPresence.checkedInAt,
             checkedOutAt: coachSessionPresence.checkedOutAt,
+            checkedInDistanceMeters: coachSessionPresence.checkedInDistanceMeters,
           });
         if (!presence) throw new Error("Coach check-in insert returned no record.");
         return presence;
@@ -1275,11 +1386,16 @@ export function createOperationsRepository(db: Database) {
       academyId: string;
       sessionId: string;
       userId: string;
+      now: Date;
       records: { studentId: string; status: "present" | "absent" | "late" | "excused" }[];
     }) {
       const roster = await this.getSessionRoster(input.academyId, input.sessionId, input.userId);
       if (roster.session.status !== "scheduled")
         throw new OperationsRepositoryError("SESSION_CLOSED");
+      if (input.now < roster.session.startsAt)
+        throw new OperationsRepositoryError("SESSION_NOT_STARTED");
+      if (!roster.session.coachCheckedInAt)
+        throw new OperationsRepositoryError("COACH_NOT_CHECKED_IN");
       const allowedStudents = new Set(roster.students.map((student) => student.studentId));
       if (input.records.some((record) => !allowedStudents.has(record.studentId))) {
         throw new OperationsRepositoryError("INVALID_ATTENDANCE");
@@ -1334,7 +1450,7 @@ export function createOperationsRepository(db: Database) {
       });
     },
 
-    async completeSession(academyId: string, sessionId: string, userId: string) {
+    async completeSession(academyId: string, sessionId: string, userId: string, now = new Date()) {
       const roster = await this.getSessionRoster(academyId, sessionId, userId);
       if (roster.session.status !== "scheduled")
         throw new OperationsRepositoryError("SESSION_CLOSED");
@@ -1344,9 +1460,21 @@ export function createOperationsRepository(db: Database) {
       ) {
         throw new OperationsRepositoryError("ATTENDANCE_INCOMPLETE");
       }
+      // Finishing the class is also a safe automatic check-out if the coach skipped that tap.
+      await db
+        .update(coachSessionPresence)
+        .set({ checkedOutAt: now })
+        .where(
+          and(
+            eq(coachSessionPresence.academyId, academyId),
+            eq(coachSessionPresence.sessionId, sessionId),
+            eq(coachSessionPresence.coachId, userId),
+            isNull(coachSessionPresence.checkedOutAt),
+          ),
+        );
       const [session] = await db
         .update(trainingSessions)
-        .set({ status: "completed", updatedAt: new Date() })
+        .set({ status: "completed", updatedAt: now })
         .where(and(eq(trainingSessions.id, sessionId), eq(trainingSessions.academyId, academyId)))
         .returning({ id: trainingSessions.id, status: trainingSessions.status });
       return session;

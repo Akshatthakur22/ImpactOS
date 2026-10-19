@@ -73,3 +73,57 @@ export async function unregisterPushDevice(
     // Logout still completes if the device is offline; server-side tokens expire by provider feedback.
   }
 }
+
+/** Schedule local class reminders on coach devices. These do not require EAS push credentials. */
+export async function syncCoachClassReminders(
+  sessions: readonly { id: string; batchName: string; startsAt: string; status: string }[],
+) {
+  if (Platform.OS !== "ios" && Platform.OS !== "android") return;
+  try {
+    const Notifications = await loadNotifications();
+    const permission = await Notifications.getPermissionsAsync();
+    if (!permission.granted && !(await Notifications.requestPermissionsAsync()).granted) return;
+    if (Platform.OS === "android") {
+      await Notifications.setNotificationChannelAsync("default", {
+        name: "SportDesk class reminders",
+        importance: Notifications.AndroidImportance.DEFAULT,
+      });
+    }
+    const existing = await Notifications.getAllScheduledNotificationsAsync();
+    const coachItems = existing.filter(
+      (item) => item.content.data?.sportdeskType === "coach-class-reminder",
+    );
+    await Promise.all(
+      coachItems.map((item) => Notifications.cancelScheduledNotificationAsync(item.identifier)),
+    );
+    const now = Date.now();
+    const upcoming = sessions
+      .filter((session) => {
+        const startsAt = new Date(session.startsAt).getTime();
+        return (
+          session.status === "scheduled" &&
+          startsAt - 30 * 60_000 > now &&
+          startsAt < now + 14 * 86_400_000
+        );
+      })
+      .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime())
+      .slice(0, 60);
+    for (const session of upcoming) {
+      const triggerAt = new Date(session.startsAt).getTime() - 30 * 60_000;
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: "Class starts in 30 minutes",
+          body: `${session.batchName} is coming up soon.`,
+          data: { sportdeskType: "coach-class-reminder", sessionId: session.id },
+          sound: true,
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DATE,
+          date: new Date(triggerAt),
+        },
+      });
+    }
+  } catch {
+    // Reminders are helpful, but a notification platform failure must not block the class list.
+  }
+}

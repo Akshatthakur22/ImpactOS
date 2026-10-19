@@ -287,19 +287,43 @@ export async function getAttendance(
   refresh: RefreshSession,
   from: string,
   to: string,
-  filters: { batchId?: string; recordedBy?: string } = {},
+  filters: { batchId?: string; recordedBy?: string; sessionId?: string } = {},
+  page: { offset?: number; limit?: number } = {},
 ) {
-  const query = new URLSearchParams({ from, to, ...filters });
-  return requestData<{ records: ReturnType<typeof AdminAttendanceEntrySchema.parse>[] }>(
+  const query = new URLSearchParams({
+    from,
+    to,
+    offset: String(page.offset ?? 0),
+    limit: String(page.limit ?? 50),
+    ...filters,
+  });
+  return requestData<{ records: ReturnType<typeof AdminAttendanceEntrySchema.parse>[]; hasMore: boolean }>(
     `/attendance?${query.toString()}`,
     (value: unknown) => ({
       records: (value as { records: unknown[] }).records.map((record) =>
         AdminAttendanceEntrySchema.parse(record),
       ),
+      hasMore: (value as { hasMore: boolean }).hasMore,
     }),
     token,
     refresh,
   );
+}
+
+export async function getAllAttendance(
+  token: string,
+  refresh: RefreshSession,
+  from: string,
+  to: string,
+  filters: { batchId?: string; recordedBy?: string; sessionId?: string } = {},
+) {
+  const records: ReturnType<typeof AdminAttendanceEntrySchema.parse>[] = [];
+  const limit = 100;
+  for (let offset = 0; ; offset += limit) {
+    const page = await getAttendance(token, refresh, from, to, filters, { offset, limit });
+    records.push(...page.records);
+    if (!page.hasMore) return records;
+  }
 }
 
 export async function getAttendanceSessions(

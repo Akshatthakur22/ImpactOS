@@ -15,8 +15,8 @@ export default async function AnalyticsPage({
       description="Review attendance-based student progress and export academy records for a selected period."
       {...(requestedSection ? { initialTab: requestedSection } : {})}
       tabs={[
-        { id: "performance", label: "Performance", content: <PerformancePage /> },
-        { id: "reports", label: "Reports", content: <ReportsPage /> },
+        { id: "performance", label: "Performance", permission: "reports:read", content: <PerformancePage /> },
+        { id: "reports", label: "Reports", permission: "reports:read", content: <ReportsPage /> },
       ]}
     />
   );

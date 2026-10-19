@@ -32,6 +32,22 @@ export async function requirePermission(
   return user;
 }
 
+export async function requireAnyPermission(
+  request: Request,
+  auth: SportDeskAuthService,
+  permissions: Permission[],
+): Promise<PublicUser> {
+  const user = await authenticatedUser(request, auth);
+  if (user.role === "owner") return user;
+  if (
+    user.role !== "staff" ||
+    !permissions.some((permission) => user.permissions?.includes(permission))
+  ) {
+    throw new AuthError(403, "FORBIDDEN", "You do not have permission to view this information.");
+  }
+  return user;
+}
+
 export async function requireRole(
   request: Request,
   auth: SportDeskAuthService,

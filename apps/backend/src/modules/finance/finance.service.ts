@@ -4,6 +4,7 @@ import type {
   ExpenseQuery,
   FeeChargeQuery,
   FinanceDateRangeQuery,
+  StudentDirectoryQuery,
   RecordFeePaymentRequest,
   RefundFeePaymentRequest,
 } from "@sportdesk/contracts";
@@ -51,6 +52,10 @@ function translateError(error: unknown): never {
 
 export function createFinanceService(repository: FinanceRepository) {
   return {
+    async listStudentOptions(academyId: string, query: StudentDirectoryQuery) {
+      return repository.listStudentOptions(academyId, query);
+    },
+
     async listCharges(academyId: string, query: FeeChargeQuery) {
       try {
         return await repository.listCharges(academyId, query);

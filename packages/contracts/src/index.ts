@@ -124,6 +124,20 @@ export const ProgressEntrySchema = z.object({
 });
 export type ProgressEntry = z.infer<typeof ProgressEntrySchema>;
 
+export const CoachStudentHistorySchema = z.object({
+  attendance: z.array(
+    z.object({
+      id: z.string().uuid(),
+      sessionId: z.string().uuid(),
+      batchName: z.string().min(1),
+      scheduledStart: z.string().datetime(),
+      status: z.enum(["present", "absent", "late", "excused"]),
+    }),
+  ),
+  progress: ProgressEntrySchema.array(),
+});
+export type CoachStudentHistory = z.infer<typeof CoachStudentHistorySchema>;
+
 export const ClientTypeSchema = z.enum(["web", "mobile"]);
 export type ClientType = z.infer<typeof ClientTypeSchema>;
 
@@ -639,6 +653,16 @@ export type AdminAnnouncement = z.infer<typeof AdminAnnouncementSchema>;
 export const AdminAnnouncementListSchema = z.object({
   announcements: z.array(AdminAnnouncementSchema),
 });
+export const AnnouncementPublishResultSchema = z.object({
+  updated: z.boolean(),
+  push: z.object({
+    configured: z.boolean(),
+    targeted: z.number().int().nonnegative(),
+    accepted: z.number().int().nonnegative(),
+    failed: z.number().int().nonnegative(),
+  }),
+});
+export type AnnouncementPublishResult = z.infer<typeof AnnouncementPublishResultSchema>;
 
 export const ParentAnnouncementSchema = z.object({
   id: z.string().uuid(),
@@ -779,6 +803,20 @@ export const FinanceSummarySchema = z.object({
 });
 export type FinanceSummary = z.infer<typeof FinanceSummarySchema>;
 
+export const FinanceStudentOptionSchema = z.object({
+  id: z.string().uuid(),
+  firstName: z.string(),
+  lastName: z.string(),
+});
+export const FinanceStudentListSchema = z.object({
+  students: z.array(FinanceStudentOptionSchema),
+  total: z.number().int().nonnegative(),
+  offset: z.number().int().nonnegative(),
+  limit: z.number().int().positive(),
+});
+export type FinanceStudentOption = z.infer<typeof FinanceStudentOptionSchema>;
+export type FinanceStudentList = z.infer<typeof FinanceStudentListSchema>;
+
 export const ExpenseListSchema = z.object({
   expenses: z.array(ExpenseSchema),
   total: z.number().int().nonnegative(),
@@ -901,6 +939,9 @@ export const AcademyBranchSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(1),
   address: z.string().nullable(),
+  geofenceLatitude: z.number().min(-90).max(90).nullable(),
+  geofenceLongitude: z.number().min(-180).max(180).nullable(),
+  geofenceRadiusMeters: z.number().int().min(25).max(1000),
   isActive: z.boolean(),
 });
 export type AcademyBranch = z.infer<typeof AcademyBranchSchema>;
@@ -909,17 +950,39 @@ export const AcademyBranchListSchema = z.object({ branches: z.array(AcademyBranc
 export const CreateAcademyBranchRequestSchema = z.object({
   name: z.string().trim().min(1).max(120),
   address: z.string().trim().max(500).nullable().optional(),
-});
+  geofenceLatitude: z.number().min(-90).max(90).nullable().optional(),
+  geofenceLongitude: z.number().min(-180).max(180).nullable().optional(),
+  geofenceRadiusMeters: z.number().int().min(25).max(1000).optional(),
+}).refine(
+  (value) => (value.geofenceLatitude == null) === (value.geofenceLongitude == null),
+  { message: "Set both location coordinates, or leave both blank.", path: ["geofenceLongitude"] },
+);
 export type CreateAcademyBranchRequest = z.infer<typeof CreateAcademyBranchRequestSchema>;
 
 export const UpdateAcademyBranchRequestSchema = z
   .object({
     name: z.string().trim().min(1).max(120).optional(),
     address: z.string().trim().max(500).nullable().optional(),
+    geofenceLatitude: z.number().min(-90).max(90).nullable().optional(),
+    geofenceLongitude: z.number().min(-180).max(180).nullable().optional(),
+    geofenceRadiusMeters: z.number().int().min(25).max(1000).optional(),
     isActive: z.boolean().optional(),
   })
+  .refine(
+    (value) =>
+      !(("geofenceLatitude" in value) !== ("geofenceLongitude" in value)) &&
+      (value.geofenceLatitude == null) === (value.geofenceLongitude == null),
+    { message: "Set both location coordinates, or clear both.", path: ["geofenceLongitude"] },
+  )
   .refine((value) => Object.keys(value).length > 0, "At least one field is required.");
 export type UpdateAcademyBranchRequest = z.infer<typeof UpdateAcademyBranchRequestSchema>;
+
+export const CoachCheckInRequestSchema = z.object({
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  accuracyMeters: z.number().positive().max(100),
+});
+export type CoachCheckInRequest = z.infer<typeof CoachCheckInRequestSchema>;
 
 const LocalTimeSchema = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
 
@@ -1004,6 +1067,31 @@ export const CoachStudentSchema = z.object({
 });
 export type CoachStudent = z.infer<typeof CoachStudentSchema>;
 
+export const CoachStudentFeedbackRequestSchema = z.object({
+  weekOf: z.string().date(),
+  performance: z.string().trim().min(1).max(1200),
+  guidance: z.string().trim().max(1200).optional().default(""),
+});
+export type CoachStudentFeedbackRequest = z.infer<typeof CoachStudentFeedbackRequestSchema>;
+
+export const CoachStudentFeedbackSchema = z.object({
+  id: z.string().uuid(),
+  studentId: z.string().uuid(),
+  coachId: z.string().uuid(),
+  coachName: z.string(),
+  weekOf: z.string().date(),
+  performance: z.string(),
+  guidance: z.string(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type CoachStudentFeedback = z.infer<typeof CoachStudentFeedbackSchema>;
+
+export const UpdateCoachProfileRequestSchema = z.object({
+  displayName: z.string().trim().min(2).max(160),
+});
+export type UpdateCoachProfileRequest = z.infer<typeof UpdateCoachProfileRequestSchema>;
+
 export const AttendanceStatusSchema = z.enum(["present", "absent", "late", "excused"]);
 export type AttendanceStatus = z.infer<typeof AttendanceStatusSchema>;
 
@@ -1042,6 +1130,11 @@ export const AdminAttendanceEntrySchema = z.object({
   correctionCount: z.number().int().min(0),
 });
 export type AdminAttendanceEntry = z.infer<typeof AdminAttendanceEntrySchema>;
+export const AdminAttendancePageSchema = z.object({
+  records: z.array(AdminAttendanceEntrySchema),
+  hasMore: z.boolean(),
+});
+export type AdminAttendancePage = z.infer<typeof AdminAttendancePageSchema>;
 
 export const AttendanceSessionSummarySchema = z.object({
   id: z.string().uuid(),

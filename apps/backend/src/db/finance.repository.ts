@@ -6,6 +6,7 @@ import type {
   FeeChargeQuery,
   RecordFeePaymentRequest,
   RefundFeePaymentRequest,
+  StudentDirectoryQuery,
 } from "@sportdesk/contracts";
 import type { Database } from "./client.js";
 import {
@@ -270,6 +271,23 @@ export function createFinanceRepository(db: Database) {
   }
 
   return {
+    async listStudentOptions(academyId: string, query: StudentDirectoryQuery) {
+      const conditions = [eq(students.academyId, academyId)];
+      if (query.search) {
+        const pattern = `%${query.search}%`;
+        conditions.push(or(ilike(students.firstName, pattern), ilike(students.lastName, pattern))!);
+      }
+      const [totalRow] = await db.select({ value: count() }).from(students).where(and(...conditions));
+      const rows = await db
+        .select({ id: students.id, firstName: students.firstName, lastName: students.lastName })
+        .from(students)
+        .where(and(...conditions))
+        .orderBy(asc(students.lastName), asc(students.firstName), asc(students.id))
+        .limit(query.limit)
+        .offset(query.offset);
+      return { students: rows, total: totalRow?.value ?? 0, offset: query.offset, limit: query.limit };
+    },
+
     async listCharges(academyId: string, query: FeeChargeQuery) {
       return listCharges(academyId, query);
     },

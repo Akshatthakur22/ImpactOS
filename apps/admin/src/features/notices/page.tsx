@@ -100,8 +100,15 @@ export default function NotificationsPage() {
     setNotice(null);
     try {
       if (action === "publish") {
-        await publishAnnouncement(accessToken, refreshSession, announcement.id);
-        setNotice(`Published to ${announcement.audience}. It is now available in the matching app feed.`);
+        const result = await publishAnnouncement(accessToken, refreshSession, announcement.id);
+        const pushStatus = !result.push.configured
+          ? "Push is not configured on this server."
+          : result.push.targeted === 0
+            ? "No eligible devices are registered for push."
+            : result.push.failed > 0
+              ? `Expo accepted ${result.push.accepted} of ${result.push.targeted} push requests; ${result.push.failed} failed.`
+              : `Expo accepted all ${result.push.accepted} push requests. Device display is not confirmed.`;
+        setNotice(`Published to ${announcement.audience}; it is available in the matching app feed. ${pushStatus}`);
       } else {
         await archiveAnnouncement(accessToken, refreshSession, announcement.id);
         setNotice("Notice archived and removed from its mobile feed.");
@@ -135,7 +142,7 @@ export default function NotificationsPage() {
       </p>
 
       <div className="mt-6 rounded-xl border border-[#d8e9e5] bg-[#f1faf7] p-4 text-sm leading-6 text-[#35645e]">
-        Publishing adds the notice to the selected audience’s in-app feed. Email, SMS, and device push are not connected.
+        Publishing adds the notice to the selected audience’s in-app feed. Email and SMS are not connected. Push status is reported after publishing; Expo acceptance does not confirm device display.
       </div>
       {error ? <div role="alert" className="mt-4 rounded-xl border border-[#f2d5ce] bg-[#fff7f5] p-4 text-sm text-[#984d3f]">{error}</div> : null}
       {notice ? <div role="status" className="mt-4 rounded-xl border border-[#d8e9e5] bg-[#f1faf7] p-4 text-sm text-accent">{notice}</div> : null}

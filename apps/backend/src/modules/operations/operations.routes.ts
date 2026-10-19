@@ -13,10 +13,12 @@ import {
   UpdateAcademyBranchRequestSchema,
   UpdateScheduleRequestSchema,
   RescheduleSessionRequestSchema,
+  UpdateCoachProfileRequestSchema,
+  CoachCheckInRequestSchema,
 } from "@sportdesk/contracts";
 import type { SportDeskAuthService } from "../auth/auth.service.js";
 import { AuthError } from "../auth/auth.service.js";
-import { requirePermission } from "../auth/authorization.js";
+import { requireAnyPermission, requirePermission } from "../auth/authorization.js";
 import { OperationsError, type SportDeskOperationsService } from "./operations.service.js";
 import type { SportDeskPushService } from "../push/push.service.js";
 
@@ -49,11 +51,16 @@ function attendanceRange(request: Request) {
       ? new Date(request.query.from)
       : new Date(now.getTime() - 30 * 86_400_000);
   const to = typeof request.query.to === "string" ? new Date(request.query.to) : now;
-  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) {
+  if (
+    Number.isNaN(from.getTime()) ||
+    Number.isNaN(to.getTime()) ||
+    from > to ||
+    to.getTime() - from.getTime() > 366 * 86_400_000
+  ) {
     throw new OperationsError(
       400,
       "INVALID_DATE_RANGE",
-      "Use a valid date range with a start before the end.",
+      "Use a valid attendance date range no longer than one year.",
     );
   }
   return { from, to };
@@ -92,7 +99,7 @@ export function createOperationsRouter(options: {
   const router = Router();
 
   router.get("/branches", async (request, response) => {
-    const user = await requirePermission(request, options.auth, "settings:manage");
+    const user = await requireAnyPermission(request, options.auth, ["settings:manage", "schedules:read"]);
     response
       .status(200)
       .json({ data: { branches: await options.operations.listBranches(user.academyId) } });
@@ -240,8 +247,12 @@ export function createOperationsRouter(options: {
   });
 
   router.get("/attendance", async (request, response) => {
-    const user = await requirePermission(request, options.auth, "attendance:read");
+    const user = await requireAnyPermission(request, options.auth, ["attendance:read", "reports:read"]);
     const { from, to } = attendanceRange(request);
+    const { offset, limit } = z.object({
+      offset: z.coerce.number().int().min(0).default(0),
+      limit: z.coerce.number().int().min(1).max(100).default(50),
+    }).parse(request.query);
     const batchId =
       typeof request.query.batchId === "string"
         ? z.string().uuid().parse(request.query.batchId)
@@ -250,11 +261,18 @@ export function createOperationsRouter(options: {
       typeof request.query.recordedBy === "string"
         ? z.string().uuid().parse(request.query.recordedBy)
         : undefined;
+    const sessionId =
+      typeof request.query.sessionId === "string"
+        ? z.string().uuid().parse(request.query.sessionId)
+        : undefined;
     const records = await options.operations.listAttendance(user.academyId, from, to, {
       ...(batchId ? { batchId } : {}),
       ...(recordedBy ? { recordedBy } : {}),
+      ...(sessionId ? { sessionId } : {}),
+      offset,
+      limit,
     });
-    response.status(200).json({ data: { records } });
+    response.status(200).json({ data: records });
   });
 
   router.get("/attendance/sessions", async (request, response) => {
@@ -332,6 +350,17 @@ export function createOperationsRouter(options: {
     response.status(200).json({ data: { students } });
   });
 
+  router.put("/coach/me/profile", async (request, response) => {
+    const user = await coachFromRequest(request, options.auth);
+    const input = UpdateCoachProfileRequestSchema.parse(request.body);
+    const profile = await options.operations.updateCoachSelfProfile(
+      user.academyId,
+      user.id,
+      input.displayName,
+    );
+    response.status(200).json({ data: profile });
+  });
+
   router.get("/coach/sessions/:sessionId/roster", async (request, response) => {
     const user = await coachFromRequest(request, options.auth);
     const roster = await options.operations.getSessionRoster(
@@ -344,10 +373,12 @@ export function createOperationsRouter(options: {
 
   router.post("/coach/sessions/:sessionId/check-in", async (request, response) => {
     const user = await coachFromRequest(request, options.auth);
+    const position = CoachCheckInRequestSchema.parse(request.body);
     const presence = await options.operations.checkInCoach(
       user.academyId,
       request.params.sessionId,
       user.id,
+      position,
     );
     response.status(200).json({ data: presence });
   });

@@ -16,7 +16,7 @@ import {
   UpdateStudentRequestSchema,
 } from "@sportdesk/contracts";
 import type { SportDeskAuthService } from "../auth/auth.service.js";
-import { requirePermission } from "../auth/authorization.js";
+import { requireAnyPermission, requirePermission } from "../auth/authorization.js";
 import type { SportDeskAcademyService } from "./academy.service.js";
 
 export function createAcademyRouter(options: {
@@ -26,7 +26,9 @@ export function createAcademyRouter(options: {
   const router = Router();
 
   router.get("/academy/settings", async (request, response) => {
-    const user = await requirePermission(request, options.auth, "settings:manage");
+    const user = await requireAnyPermission(request, options.auth, [
+      "settings:manage", "schedules:read", "attendance:read", "payments:read", "expenses:manage", "reports:read",
+    ]);
     response.status(200).json({ data: await options.academy.getSettings(user.academyId) });
   });
 
@@ -39,7 +41,9 @@ export function createAcademyRouter(options: {
   });
 
   router.get("/academy/catalog", async (request, response) => {
-    const user = await requirePermission(request, options.auth, "students:read");
+    const user = await requireAnyPermission(request, options.auth, [
+      "students:read", "academy:manage", "coaches:read", "schedules:read", "announcements:manage",
+    ]);
     response.status(200).json({ data: await options.academy.getCatalog(user.academyId) });
   });
 

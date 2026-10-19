@@ -31,6 +31,7 @@ import {
 } from "@sportdesk/contracts";
 import { z } from "zod";
 import { requestMobileData } from "@/lib/api";
+import { WorkspaceIcon, type WorkspaceIconName } from "@/components/workspace-icon";
 
 const palette = {
   ink: "#172C29",
@@ -211,54 +212,15 @@ function ChildAvatar({ size }: { size: number }) {
 
 function TabIcon({ id, active }: { id: (typeof navItems)[number]["id"]; active: boolean }) {
   const color = active ? palette.forest : palette.muted;
-  if (id === "home") {
-    return (
-      <View style={styles.iconHome}>
-        <View style={[styles.iconHomeRoof, { borderColor: color }]} />
-        <View style={[styles.iconHomeBody, { borderColor: color }]}>
-          <View style={[styles.iconHomeDoor, { backgroundColor: color }]} />
-        </View>
-      </View>
-    );
-  }
-  if (id === "schedule") {
-    return (
-      <View style={[styles.iconCalendar, { borderColor: color }]}>
-        <View style={[styles.iconCalendarTop, { borderColor: color }]} />
-        <View style={styles.iconCalendarGrid}>
-          <View style={[styles.iconCalendarCell, { backgroundColor: color }]} />
-          <View style={[styles.iconCalendarCell, { backgroundColor: color }]} />
-          <View style={[styles.iconCalendarCell, { backgroundColor: color }]} />
-          <View style={[styles.iconCalendarCell, { backgroundColor: color }]} />
-        </View>
-      </View>
-    );
-  }
-  if (id === "attendance") {
-    return (
-      <View style={[styles.iconCheckCircle, { borderColor: color }]}>
-        <Text style={[styles.iconCheck, { color }]}>✓</Text>
-      </View>
-    );
-  }
-  if (id === "progress") {
-    return (
-      <View style={styles.iconBars}>
-        <View style={[styles.iconBar, { height: 8, backgroundColor: color }]} />
-        <View style={[styles.iconBar, { height: 13, backgroundColor: color }]} />
-        <View style={[styles.iconBar, { height: 17, backgroundColor: color }]} />
-      </View>
-    );
-  }
-  if (id === "payments") {
-    return (
-      <View style={[styles.iconWallet, { borderColor: color }]}>
-        <View style={[styles.iconWalletFlap, { backgroundColor: color }]} />
-        <View style={[styles.iconWalletDot, { backgroundColor: color }]} />
-      </View>
-    );
-  }
-  return <ChildAvatar size={20} />;
+  const iconByTab: Record<(typeof navItems)[number]["id"], WorkspaceIconName> = {
+    home: "home",
+    schedule: "calendar",
+    attendance: "attendance",
+    progress: "progress",
+    payments: "wallet",
+    profile: "profile",
+  };
+  return <WorkspaceIcon name={iconByTab[id]} color={color} size={20} />;
 }
 
 function EmptyState({ symbol, title, detail }: { symbol: string; title: string; detail: string }) {

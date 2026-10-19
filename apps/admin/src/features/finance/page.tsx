@@ -6,11 +6,10 @@ import type {
   FeeCharge,
   FeeChargeStateFilter,
   FinanceSummary,
-  Student,
+  FinanceStudentOption,
 } from "@sportdesk/contracts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { getStudents } from "@/lib/academy-api";
 import { ApiRequestError } from "@/lib/auth-api";
 import {
   calendarDateInTimezone,
@@ -23,6 +22,7 @@ import {
   getExpenses,
   getFeeCharges,
   getFinanceSummary,
+  getFinanceStudents,
   recordFeePayment,
   refundFeePayment,
   voidExpense,
@@ -81,11 +81,15 @@ function rangeRows(summary: FinanceSummary) {
 
 export default function FinancePage({ initialTab = "fees" }: { initialTab?: FinanceTab }) {
   const { accessToken, refreshSession, user } = useAuth();
+  const canReadFees = user?.role === "owner" || user?.permissions?.includes("payments:read") === true;
+  const canManageExpenses = user?.role === "owner" || user?.permissions?.includes("expenses:manage") === true;
   const [timezone, setTimezone] = useState("Asia/Kolkata");
   const today = calendarDateInTimezone(new Date(), timezone);
   const [tab, setTab] = useState<FinanceTab>(initialTab);
 
-  useEffect(() => setTab(initialTab), [initialTab]);
+  useEffect(() => {
+    setTab(canReadFees ? initialTab : "expenses");
+  }, [canReadFees, initialTab]);
   const [from, setFrom] = useState(`${today.slice(0, 7)}-01`);
   const [to, setTo] = useState(today);
   const [summary, setSummary] = useState<FinanceSummary | null>(null);
@@ -98,7 +102,11 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
   const [expenseTotal, setExpenseTotal] = useState(0);
   const [expenseOffset, setExpenseOffset] = useState(0);
   const [expenseSearch, setExpenseSearch] = useState("");
-  const [students, setStudents] = useState<Student[]>([]);
+  const [students, setStudents] = useState<FinanceStudentOption[]>([]);
+  const [studentSearch, setStudentSearch] = useState("");
+  const [studentOffset, setStudentOffset] = useState(0);
+  const [studentTotal, setStudentTotal] = useState(0);
+  const [selectedStudentOption, setSelectedStudentOption] = useState<FinanceStudentOption | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -169,30 +177,31 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
 
   const loadData = useCallback(
     async (token: string) => {
-      const [summaryResult, chargeResult, expenseResult, studentResult] = await Promise.all([
-        getFinanceSummary(token, refreshSession, { from, to }),
-        getFeeCharges(token, refreshSession, {
+      const [summaryResult, chargeResult, expenseResult] = await Promise.all([
+        canReadFees ? getFinanceSummary(token, refreshSession, { from, to }) : Promise.resolve(null),
+        canReadFees ? getFeeCharges(token, refreshSession, {
           offset: chargeOffset,
           limit: pageSize,
           state: chargeState,
           ...(chargeSearch.trim() ? { search: chargeSearch.trim() } : {}),
-        }),
-        getExpenses(token, refreshSession, {
+        }) : Promise.resolve(null),
+        canManageExpenses ? getExpenses(token, refreshSession, {
           from,
           to,
           offset: expenseOffset,
           limit: pageSize,
           ...(expenseSearch.trim() ? { search: expenseSearch.trim() } : {}),
-        }),
-        getStudents(token, refreshSession, { offset: 0, limit: 100 }),
+        }) : Promise.resolve(null),
       ]);
       setSummary(summaryResult);
-      setCharges(chargeResult.charges);
-      setChargeTotal(chargeResult.total);
-      setExpenses(expenseResult.expenses);
-      setExpenseTotal(expenseResult.total);
-      setStudents(studentResult.students);
-      setStudentId((current) => current || studentResult.students[0]?.id || "");
+      if (chargeResult) {
+        setCharges(chargeResult.charges);
+        setChargeTotal(chargeResult.total);
+      }
+      if (expenseResult) {
+        setExpenses(expenseResult.expenses);
+        setExpenseTotal(expenseResult.total);
+      }
     },
     [
       chargeOffset,
@@ -203,8 +212,37 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
       from,
       refreshSession,
       to,
+      canReadFees,
+      canManageExpenses,
     ],
   );
+
+  useEffect(() => {
+    if (!accessToken) return;
+    let active = true;
+    if (!canReadFees) return;
+    getFinanceStudents(accessToken, refreshSession, {
+      ...(studentSearch.trim() ? { search: studentSearch.trim() } : {}),
+      offset: studentOffset,
+      limit: 50,
+    })
+      .then((result) => {
+        if (!active) return;
+        setStudents(result.students);
+        setStudentTotal(result.total);
+        const first = result.students[0];
+        if (!studentId && first) {
+          setStudentId(first.id);
+          setSelectedStudentOption(first);
+        }
+      })
+      .catch((caught: unknown) => {
+        if (active) setError(caught instanceof Error ? caught.message : "Could not search students.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [accessToken, canReadFees, refreshSession, studentId, studentOffset, studentSearch]);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -487,13 +525,13 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
               expenses. Parent accounts can view linked invoices and receipts.
             </p>
           </div>
-          <Button
+          {canReadFees ? <Button
             variant="outline"
             disabled={exporting || loading || !summary}
             onClick={() => void downloadReport()}
           >
             {exporting ? "Preparing report…" : "Export period report"}
-          </Button>
+          </Button> : null}
         </div>
 
         {error && (
@@ -536,7 +574,7 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
           </div>
         </section>
 
-        <section className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {canReadFees ? <section className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <Metric
             label="Collected"
             value={summary ? formatMoney(summary.collectedPaise, currency) : "—"}
@@ -572,14 +610,14 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
             value={summary ? formatMoney(summary.netCashFlowPaise, currency) : "—"}
             detail="Net collections less expenses"
           />
-        </section>
+        </section> : null}
 
         <div
           className="mt-8 flex gap-2 border-b border-line"
           role="tablist"
           aria-label="Finance sections"
         >
-          <button
+          {canReadFees ? <button
             type="button"
             role="tab"
             aria-selected={tab === "fees"}
@@ -587,8 +625,8 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
             className={`border-b-2 px-3 py-3 text-sm font-semibold ${tab === "fees" ? "border-accent text-accent" : "border-transparent text-muted"}`}
           >
             Parent fees and receipts
-          </button>
-          <button
+          </button> : null}
+          {canManageExpenses ? <button
             type="button"
             role="tab"
             aria-selected={tab === "expenses"}
@@ -596,10 +634,10 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
             className={`border-b-2 px-3 py-3 text-sm font-semibold ${tab === "expenses" ? "border-accent text-accent" : "border-transparent text-muted"}`}
           >
             Academy expenses
-          </button>
+          </button> : null}
         </div>
 
-        {tab === "fees" ? (
+        {canReadFees && tab === "fees" ? (
           <div className="mt-6 grid items-start gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
             <section className="rounded-2xl border border-line bg-white p-5 sm:p-6">
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted">
@@ -612,19 +650,44 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
               <form className="mt-5 space-y-3" onSubmit={(event) => void createCharge(event)}>
                 <label className="grid gap-1 text-xs font-medium text-muted">
                   Student
+                  <Input
+                    aria-label="Search students for invoice"
+                    placeholder="Search by student name"
+                    value={studentSearch}
+                    onChange={(event) => {
+                      setStudentSearch(event.target.value);
+                      setStudentOffset(0);
+                    }}
+                  />
                   <select
                     className="h-11 rounded-xl border border-line bg-white px-3 text-sm text-foreground"
                     value={studentId}
-                    onChange={(event) => setStudentId(event.target.value)}
+                    onChange={(event) => {
+                      const id = event.target.value;
+                      setStudentId(id);
+                      setSelectedStudentOption(students.find((student) => student.id === id) ?? null);
+                    }}
                     required
                   >
                     <option value="">Select student</option>
+                    {selectedStudentOption && !students.some((student) => student.id === selectedStudentOption.id) && (
+                      <option value={selectedStudentOption.id}>
+                        {selectedStudentOption.firstName} {selectedStudentOption.lastName}
+                      </option>
+                    )}
                     {students.map((student) => (
                       <option key={student.id} value={student.id}>
-                        {student.firstName} {student.lastName} · {student.status}
+                        {student.firstName} {student.lastName}
                       </option>
                     ))}
                   </select>
+                  <span className="flex items-center justify-between text-[11px] font-normal">
+                    <span>{studentTotal} matching students</span>
+                    <span className="flex gap-2">
+                      <button type="button" disabled={studentOffset === 0} onClick={() => setStudentOffset((value) => Math.max(0, value - 50))}>Previous</button>
+                      <button type="button" disabled={studentOffset + 50 >= studentTotal} onClick={() => setStudentOffset((value) => value + 50)}>Next</button>
+                    </span>
+                  </span>
                 </label>
                 <Input
                   aria-label="Invoice description"
@@ -940,7 +1003,7 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
               />
             </section>
           </div>
-        ) : (
+        ) : canManageExpenses ? (
           <div className="mt-6 grid items-start gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
             <section className="rounded-2xl border border-line bg-white p-5 sm:p-6">
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted">
@@ -1110,7 +1173,7 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
               </p>
             </section>
           </div>
-        )}
+        ) : null}
 
         {refundPaymentId && (
           <div

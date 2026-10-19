@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { useAuth } from "@/hooks/use-auth";
 import { getStudents } from "@/lib/academy-api";
 import { getFinanceSummary } from "@/lib/finance-api";
-import { getAttendance } from "@/lib/operations-api";
+import { getAllAttendance } from "@/lib/operations-api";
 import { getAcademySettings } from "@/lib/settings-api";
 
 function csvCell(value: string | number) {
@@ -64,11 +64,11 @@ export default function ReportsPage() {
     setBusy("attendance");
     try {
       const range = dateRangeInTimezone(from, to, timezone);
-      const result = await getAttendance(accessToken, refreshSession, range.from, range.to);
+      const attendanceRecords = await getAllAttendance(accessToken, refreshSession, range.from, range.to);
       const rows: Array<Array<string | number>> = [[
         "Student", "Batch", "Session date", "Attendance", "Recorded by", "Recorded at", "Corrections",
       ]];
-      for (const record of result.records) {
+      for (const record of attendanceRecords) {
         rows.push([
           record.studentName,
           record.batchName,
@@ -80,7 +80,7 @@ export default function ReportsPage() {
         ]);
       }
       downloadCsv(`attendance-${from}-to-${to}.csv`, rows);
-      setNotice(`Exported ${result.records.length} attendance records. Unmarked session rosters are not included.`);
+      setNotice(`Exported ${attendanceRecords.length} attendance records. Unmarked session rosters are not included.`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not export attendance.");
     } finally {

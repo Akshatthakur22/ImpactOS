@@ -55,6 +55,7 @@ export default function SchedulePage() {
   const [generationFrom, setGenerationFrom] = useState("");
   const [generationTo, setGenerationTo] = useState("");
   const [editingSchedule, setEditingSchedule] = useState<string | null>(null);
+  const [editBranchId, setEditBranchId] = useState("");
   const [editDay, setEditDay] = useState("1");
   const [editStart, setEditStart] = useState("09:00");
   const [editEnd, setEditEnd] = useState("10:00");
@@ -178,6 +179,7 @@ export default function SchedulePage() {
     setNotice(null);
     try {
       await updateSchedule(accessToken, refreshSession, schedule.id, {
+        branchId: editBranchId || null,
         dayOfWeek: Number(editDay),
         startTime: editStart,
         endTime: editEnd,
@@ -264,6 +266,12 @@ export default function SchedulePage() {
         <strong className="text-foreground">{timezone}</strong>. Times are interpreted in this zone
         even when your device is elsewhere.
       </p>
+      {schedules.some((schedule) => schedule.isActive && !schedule.branchId) ||
+      branches.some((branch) => branch.isActive && (branch.geofenceLatitude === null || branch.geofenceLongitude === null)) ? (
+        <div className="mt-4 rounded-xl border border-[#ead9ae] bg-[#fff9e9] p-4 text-sm leading-6 text-[#755d25]">
+          Coach location check-in needs an active branch with latitude and longitude, assigned to the schedule. Configure branch coordinates and select that branch on each recurring schedule. Do not enter approximate coordinates.
+        </div>
+      ) : null}
       {error && (
         <div
           role="alert"
@@ -453,6 +461,7 @@ export default function SchedulePage() {
                     disabled={busy}
                     onClick={() => {
                       setEditingSchedule(schedule.id);
+                      setEditBranchId(schedule.branchId ?? "");
                       setEditDay(String(schedule.dayOfWeek));
                       setEditStart(schedule.startTime);
                       setEditEnd(schedule.endTime);
@@ -472,7 +481,7 @@ export default function SchedulePage() {
                 </div>
               </div>
               {editingSchedule === schedule.id && (
-                <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_1fr_1fr_auto]">
+                <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_1fr_1.2fr_1fr_auto]">
                   <select
                     aria-label="Edit schedule day"
                     className={inputClass}
@@ -503,6 +512,21 @@ export default function SchedulePage() {
                     onChange={(event) => setEditVenue(event.target.value)}
                     placeholder="Venue"
                   />
+                  <select
+                    aria-label="Edit schedule branch"
+                    className={inputClass}
+                    value={editBranchId}
+                    onChange={(event) => setEditBranchId(event.target.value)}
+                  >
+                    <option value="">No branch selected</option>
+                    {branches
+                      .filter((branch) => branch.isActive)
+                      .map((branch) => (
+                        <option key={branch.id} value={branch.id}>
+                          {branch.name}
+                        </option>
+                      ))}
+                  </select>
                   <Button size="sm" disabled={busy} onClick={() => void saveSchedule(schedule)}>
                     Save
                   </Button>

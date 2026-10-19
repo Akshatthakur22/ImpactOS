@@ -9,6 +9,7 @@ import { createStaff, getStaff, updateStaff, type StaffMember } from "@/lib/staf
 
 const permissions = [
   ["admin:dashboard:read", "Dashboard"],
+  ["reports:read", "Analytics and reports"],
   ["students:read", "View students"],
   ["students:write", "Manage students"],
   ["admissions:manage", "Admissions"],

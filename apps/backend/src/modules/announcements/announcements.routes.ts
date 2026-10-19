@@ -52,12 +52,24 @@ export function createAnnouncementsRouter(options: {
 
   router.post("/announcements/:announcementId/publish", async (request, response) => {
     const user = await requirePermission(request, options.auth, "announcements:manage");
+    const announcementId = z.string().uuid().parse(request.params.announcementId);
     const result = await options.announcements.publish({
       academyId: user.academyId,
-      announcementId: z.string().uuid().parse(request.params.announcementId),
+      announcementId,
     });
-    if (options.push) void options.push.announcementPublished(user.academyId, z.string().uuid().parse(request.params.announcementId)).catch(() => console.warn("Announcement push preparation failed."));
-    response.status(200).json({ data: result });
+    let push = { configured: Boolean(options.push), targeted: 0, accepted: 0, failed: 0 };
+    if (options.push) {
+      try {
+        push = {
+          configured: true,
+          ...(await options.push.announcementPublished(user.academyId, announcementId)),
+        };
+      } catch (error) {
+        console.warn("Announcement push preparation failed.", error instanceof Error ? error.message : "unknown error");
+        push.failed = 1;
+      }
+    }
+    response.status(200).json({ data: { ...result, push } });
   });
 
   router.post("/announcements/:announcementId/archive", async (request, response) => {

@@ -6,6 +6,8 @@ export function createPushService(repository: PushRepository) {
   async function send(
     messages: { to: string; title: string; body: string; data?: Record<string, string> }[],
   ) {
+    let accepted = 0;
+    let failed = 0;
     for (let offset = 0; offset < messages.length; offset += 100) {
       const batch = messages.slice(offset, offset + 100);
       try {
@@ -14,22 +16,30 @@ export function createPushService(repository: PushRepository) {
           headers: { Accept: "application/json", "Content-Type": "application/json" },
           body: JSON.stringify(batch),
         });
-        if (!response.ok) continue;
+        if (!response.ok) {
+          failed += batch.length;
+          continue;
+        }
         const result = (await response.json()) as {
           data?: { status?: string; details?: { error?: string } }[];
         };
         for (const [index, ticket] of (result.data ?? []).entries()) {
+          if (ticket.status === "ok") accepted += 1;
+          else failed += 1;
           if (ticket.status === "error" && ticket.details?.error === "DeviceNotRegistered") {
             await repository.deactivateToken(batch[index]!.to);
           }
         }
+        failed += Math.max(0, batch.length - (result.data?.length ?? 0));
       } catch (error) {
+        failed += batch.length;
         console.warn(
           "Expo push delivery failed.",
           error instanceof Error ? error.message : "unknown error",
         );
       }
     }
+    return { targeted: messages.length, accepted, failed };
   }
   return {
     async register(input: PushDeviceRequest & { academyId: string; userId: string }) {
@@ -51,7 +61,7 @@ export function createPushService(repository: PushRepository) {
     },
     async announcementPublished(academyId: string, announcementId: string) {
       const devices = await repository.listAnnouncementRecipients(academyId, announcementId);
-      await send([...new Map(devices.map((item) => [item.token, item])).values()].map(({ token, title, body }) => ({
+      return send([...new Map(devices.map((item) => [item.token, item])).values()].map(({ token, title, body }) => ({
         to: token,
         title: `Academy notice: ${title}`,
         body: body.slice(0, 160),

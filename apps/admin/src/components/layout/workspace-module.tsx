@@ -1,11 +1,15 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import type { Permission } from "@sportdesk/contracts";
+import { useAuth } from "@/hooks/use-auth";
 
 export type WorkspaceTab = {
   id: string;
   label: string;
   content: ReactNode;
+  permission?: Permission;
+  permissions?: Permission[];
 };
 
 export function WorkspaceModule({
@@ -19,10 +23,17 @@ export function WorkspaceModule({
   initialTab?: string;
   tabs: WorkspaceTab[];
 }) {
-  const [activeTab, setActiveTab] = useState(
-    tabs.some((tab) => tab.id === initialTab) ? initialTab! : (tabs[0]?.id ?? ""),
+  const { user } = useAuth();
+  const visibleTabs = tabs.filter(
+    (tab) => user?.role === "owner" ||
+      (tab.permission ? user?.permissions?.includes(tab.permission) : false) ||
+      (tab.permissions?.some((permission) => user?.permissions?.includes(permission)) ?? false),
   );
-  const activeContent = tabs.find((tab) => tab.id === activeTab)?.content;
+  const [requestedTab, setRequestedTab] = useState(initialTab ?? "");
+  const activeTab = visibleTabs.some((tab) => tab.id === requestedTab)
+    ? requestedTab
+    : (visibleTabs[0]?.id ?? "");
+  const activeContent = visibleTabs.find((tab) => tab.id === activeTab)?.content;
 
   return (
     <section className="mx-auto w-full max-w-[1320px] px-5 py-8 sm:px-8 sm:py-10">
@@ -35,7 +46,7 @@ export function WorkspaceModule({
       </header>
       <div className="mt-6 border-b border-line">
         <div className="flex gap-1 overflow-x-auto" role="tablist" aria-label={`${title} sections`}>
-          {tabs.map((tab) => (
+          {visibleTabs.map((tab) => (
             <button
               key={tab.id}
               type="button"
@@ -43,7 +54,7 @@ export function WorkspaceModule({
               id={`${title.toLowerCase().replaceAll(" ", "-")}-${tab.id}-tab`}
               aria-selected={activeTab === tab.id}
               aria-controls={`${title.toLowerCase().replaceAll(" ", "-")}-${tab.id}-panel`}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => setRequestedTab(tab.id)}
               className={`whitespace-nowrap border-b-2 px-4 py-3 text-sm transition-colors ${
                 activeTab === tab.id
                   ? "border-accent font-semibold text-accent"

@@ -44,7 +44,7 @@ function translateError(error: unknown): never {
       throw new OperationsError(
         409,
         error.code,
-        "Check-in opens one hour before the scheduled class.",
+        "Check-in opens 15 minutes before the scheduled class.",
       );
     }
     if (error.code === "SESSION_NOT_STARTED") {
@@ -56,6 +56,16 @@ function translateError(error: unknown): never {
     }
     if (error.code === "COACH_NOT_CHECKED_IN") {
       throw new OperationsError(409, error.code, "Check in to this class before checking out.");
+    }
+    if (error.code === "BRANCH_LOCATION_NOT_CONFIGURED") {
+      throw new OperationsError(
+        409,
+        error.code,
+        "Ask the academy to add this branch’s check-in location before class check-in.",
+      );
+    }
+    if (error.code === "COACH_OUTSIDE_GEOFENCE") {
+      throw new OperationsError(403, error.code, "You appear to be outside the class location.");
     }
     if (error.code === "SESSION_NOT_RESCHEDULABLE") {
       throw new OperationsError(
@@ -259,14 +269,17 @@ export function createOperationsService(
       academyId: string,
       from: Date,
       to: Date,
-      filters?: { batchId?: string; recordedBy?: string },
+      filters?: { batchId?: string; recordedBy?: string; sessionId?: string; offset?: number; limit?: number },
     ) {
-      const records = await repository.listAttendance(academyId, from, to, filters);
-      return records.map((record) => ({
-        ...record,
-        scheduledStart: isoDate(record.scheduledStart),
-        recordedAt: isoDate(record.recordedAt),
-      }));
+      const page = await repository.listAttendance(academyId, from, to, filters);
+      return {
+        ...page,
+        records: page.records.map((record) => ({
+          ...record,
+          scheduledStart: isoDate(record.scheduledStart),
+          recordedAt: isoDate(record.recordedAt),
+        })),
+      };
     },
 
     async listAttendanceSessions(academyId: string, from: Date, to: Date, batchId?: string) {
@@ -353,6 +366,13 @@ export function createOperationsService(
       return repository.listCoachStudents(academyId, userId);
     },
 
+    async updateCoachSelfProfile(academyId: string, userId: string, displayName: string) {
+      const profile = await repository.updateCoachSelfProfile(academyId, userId, displayName);
+      if (!profile)
+        throw new OperationsError(404, "COACH_NOT_FOUND", "Coach account was not found.");
+      return profile;
+    },
+
     async getSessionRoster(academyId: string, sessionId: string, userId: string) {
       try {
         const roster = await repository.getSessionRoster(academyId, sessionId, userId);
@@ -379,20 +399,33 @@ export function createOperationsService(
       input: RecordAttendanceRequest & { academyId: string; sessionId: string; userId: string },
     ) {
       try {
-        const records = await repository.recordAttendance(input);
+        const records = await repository.recordAttendance({ ...input, now: now() });
         return records.map((record) => ({ ...record, recordedAt: isoDate(record.recordedAt) }));
       } catch (error) {
         translateError(error);
       }
     },
 
-    async checkInCoach(academyId: string, sessionId: string, userId: string) {
+    async checkInCoach(
+      academyId: string,
+      sessionId: string,
+      userId: string,
+      position: { latitude: number; longitude: number; accuracyMeters: number },
+    ) {
+      if (position.accuracyMeters > 50) {
+        throw new OperationsError(
+          422,
+          "LOCATION_TOO_INACCURATE",
+          "Your location is not accurate enough. Move outdoors and try again.",
+        );
+      }
       try {
         const presence = await repository.recordCoachCheckIn({
           academyId,
           sessionId,
           userId,
           now: now(),
+          ...position,
         });
         return {
           checkedInAt: isoDate(presence.checkedInAt),
@@ -422,7 +455,7 @@ export function createOperationsService(
 
     async completeSession(academyId: string, sessionId: string, userId: string) {
       try {
-        return await repository.completeSession(academyId, sessionId, userId);
+        return await repository.completeSession(academyId, sessionId, userId, now());
       } catch (error) {
         translateError(error);
       }

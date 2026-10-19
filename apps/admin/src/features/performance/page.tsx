@@ -5,7 +5,7 @@ import type { AdminAttendanceEntry, ProgressEntry } from "@sportdesk/contracts";
 import { calendarDateInTimezone, dateRangeInTimezone } from "@/lib/academy-time";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/hooks/use-auth";
-import { getAttendance, getProgressEntries } from "@/lib/operations-api";
+import { getAllAttendance, getProgressEntries } from "@/lib/operations-api";
 import { getAcademySettings } from "@/lib/settings-api";
 
 type StudentSummary = {
@@ -27,6 +27,8 @@ export default function PerformancePage() {
   const [timezone, setTimezone] = useState("Asia/Kolkata");
   const [records, setRecords] = useState<AdminAttendanceEntry[]>([]);
   const [progressEntries, setProgressEntries] = useState<ProgressEntry[]>([]);
+  const [progressError, setProgressError] = useState<string | null>(null);
+  const [progressReloadKey, setProgressReloadKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,9 +57,15 @@ export default function PerformancePage() {
   useEffect(() => {
     if (!accessToken) return;
     getProgressEntries(accessToken, refreshSession)
-      .then(({ entries }) => setProgressEntries(entries))
-      .catch(() => setProgressEntries([]));
-  }, [accessToken, refreshSession]);
+      .then(({ entries }) => {
+        setProgressEntries(entries);
+        setProgressError(null);
+      })
+      .catch((caught: unknown) => {
+        setProgressEntries([]);
+        setProgressError(caught instanceof Error ? caught.message : "Could not load progress entries.");
+      });
+  }, [accessToken, progressReloadKey, refreshSession]);
 
   useEffect(() => {
     if (!accessToken || !from || !to) return;
@@ -70,9 +78,9 @@ export default function PerformancePage() {
     setLoading(true);
     setError(null);
     const range = dateRangeInTimezone(from, to, timezone);
-    getAttendance(accessToken, refreshSession, range.from, range.to)
+    getAllAttendance(accessToken, refreshSession, range.from, range.to)
       .then((result) => {
-        if (active) setRecords(result.records);
+        if (active) setRecords(result);
       })
       .catch((caught: unknown) => {
         if (active)
@@ -165,6 +173,12 @@ export default function PerformancePage() {
           className="mt-4 rounded-xl border border-[#f2d5ce] bg-[#fff7f5] p-4 text-sm text-[#984d3f]"
         >
           {error}
+        </div>
+      ) : null}
+      {progressError ? (
+        <div role="alert" className="mt-3 rounded-xl border border-[#f2d5ce] bg-[#fff7f5] p-4 text-sm text-[#984d3f]">
+          <span>Progress entries could not be loaded: {progressError}</span>{" "}
+          <button type="button" className="font-semibold underline" onClick={() => setProgressReloadKey((value) => value + 1)}>Try again</button>
         </div>
       ) : null}
 

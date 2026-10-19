@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { calendarDateInTimezone, dateRangeInTimezone } from "@/lib/academy-time";
 import {
   correctAttendance,
+  getAllAttendance,
   getAttendance,
   getAttendanceCorrections,
   getAttendanceSessions,
@@ -28,11 +29,14 @@ const statusLabels: Record<AttendanceStatus, string> = {
 };
 
 export default function AttendancePage() {
-  const { accessToken, refreshSession } = useAuth();
+  const { accessToken, refreshSession, user } = useAuth();
+  const canCorrect = user?.role === "owner" || user?.permissions?.includes("attendance:correct") === true;
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [timezone, setTimezone] = useState("Asia/Kolkata");
   const [records, setRecords] = useState<AdminAttendanceEntry[]>([]);
+  const [recordOffset, setRecordOffset] = useState(0);
+  const [recordHasMore, setRecordHasMore] = useState(false);
   const [sessionSummaries, setSessionSummaries] = useState<AttendanceSessionSummary[]>([]);
   const [batchFilter, setBatchFilter] = useState("");
   const [coachFilter, setCoachFilter] = useState("");
@@ -50,12 +54,17 @@ export default function AttendancePage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  async function load(token: string) {
+  async function load(token: string, offset = recordOffset) {
     const range = dateRangeInTimezone(from, to, timezone);
+    if (new Date(range.to).getTime() - new Date(range.from).getTime() > 90 * 86_400_000) {
+      throw new Error("Attendance review is limited to a 90-day window. Choose a shorter date range.");
+    }
     const [result, sessions] = await Promise.all([
       getAttendance(token, refreshSession, range.from, range.to, {
         ...(batchFilter ? { batchId: batchFilter } : {}),
-      }),
+        ...(coachFilter ? { recordedBy: coachFilter } : {}),
+        ...(selectedSessionId ? { sessionId: selectedSessionId } : {}),
+      }, { offset, limit: 50 }),
       getAttendanceSessions(
         token,
         refreshSession,
@@ -65,6 +74,7 @@ export default function AttendancePage() {
       ),
     ]);
     setRecords(result.records);
+    setRecordHasMore(result.hasMore);
     setSessionSummaries(sessions.sessions);
     setStatusesById(Object.fromEntries(result.records.map((record) => [record.id, record.status])));
   }
@@ -100,7 +110,7 @@ export default function AttendancePage() {
         setError(caught instanceof Error ? caught.message : "Could not load attendance."),
       )
       .finally(() => setLoading(false));
-  }, [accessToken, batchFilter, coachFilter, from, refreshSession, to, timezone]);
+  }, [accessToken, batchFilter, coachFilter, from, recordOffset, refreshSession, selectedSessionId, to, timezone]);
 
   const visibleRecords = records.filter(
     (record) =>
@@ -122,7 +132,15 @@ export default function AttendancePage() {
     ...new Map(records.map((record) => [record.recordedBy, record.recorderName])).entries(),
   ];
 
-  function exportVisibleRecords() {
+  async function exportVisibleRecords() {
+    if (!accessToken) return;
+    const range = dateRangeInTimezone(from, to, timezone);
+    const allRecords = await getAllAttendance(accessToken, refreshSession, range.from, range.to, {
+      ...(batchFilter ? { batchId: batchFilter } : {}),
+      ...(coachFilter ? { recordedBy: coachFilter } : {}),
+      ...(selectedSessionId ? { sessionId: selectedSessionId } : {}),
+    });
+    const exportRecords = allRecords.filter((record) => statusFilter === "all" || record.status === statusFilter);
     const cell = (value: string | number) => {
       let safe = String(value);
       if (/^[=+@\-\t\r]/.test(safe)) safe = `'${safe}`;
@@ -130,7 +148,7 @@ export default function AttendancePage() {
     };
     const rows = [
       ["Student", "Batch", "Session date", "Status", "Recorded by", "Recorded at", "Corrections"],
-      ...visibleRecords.map((record) => [
+      ...exportRecords.map((record) => [
         record.studentName,
         record.batchName,
         new Intl.DateTimeFormat("en-IN", {
@@ -253,11 +271,11 @@ export default function AttendancePage() {
       <section className="mt-8 flex flex-wrap items-end gap-3 rounded-2xl border border-line bg-white p-5">
         <label className="grid gap-2 text-xs font-semibold text-muted">
           From
-          <InputDate value={from} onChange={setFrom} />
+          <InputDate value={from} onChange={(value) => { setFrom(value); setRecordOffset(0); }} />
         </label>
         <label className="grid gap-2 text-xs font-semibold text-muted">
           To
-          <InputDate value={to} onChange={setTo} />
+          <InputDate value={to} onChange={(value) => { setTo(value); setRecordOffset(0); }} />
         </label>
         <Button variant="outline" onClick={() => void applyFilter()} disabled={loading}>
           Apply dates
@@ -306,7 +324,7 @@ export default function AttendancePage() {
             <select
               className="h-10 min-w-48 rounded-xl border border-line bg-white px-3 text-sm font-normal text-foreground"
               value={batchFilter}
-              onChange={(event) => setBatchFilter(event.target.value)}
+              onChange={(event) => { setBatchFilter(event.target.value); setRecordOffset(0); }}
             >
               <option value="">All batches</option>
               {batches.map(([id, name]) => (
@@ -322,7 +340,7 @@ export default function AttendancePage() {
               <select
                 className="h-10 min-w-48 rounded-xl border border-line bg-white px-3 text-sm font-normal text-foreground"
                 value={coachFilter}
-                onChange={(event) => setCoachFilter(event.target.value)}
+                onChange={(event) => { setCoachFilter(event.target.value); setRecordOffset(0); }}
               >
                 <option value="">All coaches</option>
                 {coaches.map(([id, name]) => (
@@ -432,7 +450,7 @@ export default function AttendancePage() {
               size="sm"
               variant="outline"
               disabled={!visibleRecords.length}
-              onClick={exportVisibleRecords}
+              onClick={() => void exportVisibleRecords().catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "Could not export attendance."))}
             >
               Export filtered CSV
             </Button>
@@ -479,7 +497,7 @@ export default function AttendancePage() {
                         }).format(new Date(record.recordedAt))}
                       </div>
                     </div>
-                    <div className="grid gap-2 sm:grid-cols-[1fr_1.4fr_auto] lg:grid-cols-1 xl:grid-cols-[1fr_1.4fr_auto]">
+                    {canCorrect ? <div className="grid gap-2 sm:grid-cols-[1fr_1.4fr_auto] lg:grid-cols-1 xl:grid-cols-[1fr_1.4fr_auto]">
                       <select
                         aria-label={`Status for ${record.studentName}`}
                         className="h-10 rounded-xl border border-line bg-white px-3 text-sm"
@@ -518,7 +536,7 @@ export default function AttendancePage() {
                       >
                         {savingId === record.id ? "Saving…" : "Correct"}
                       </Button>
-                    </div>
+                    </div> : <p className="text-xs text-muted">View only — you do not have attendance correction access.</p>}
                     {record.correctionCount > 0 ? (
                       <div className="lg:col-span-2">
                         <button
@@ -560,6 +578,13 @@ export default function AttendancePage() {
               })}
             </div>
           )}
+          <div className="flex items-center justify-between border-t border-line px-5 py-3 text-xs text-muted">
+            <span>Showing {recordOffset + (records.length ? 1 : 0)}–{recordOffset + records.length}; counts apply to this page</span>
+            <span className="flex gap-2">
+              <Button size="sm" variant="outline" disabled={recordOffset === 0 || loading} onClick={() => setRecordOffset((value) => Math.max(0, value - 50))}>Previous</Button>
+              <Button size="sm" variant="outline" disabled={!recordHasMore || loading} onClick={() => setRecordOffset((value) => value + 50)}>Next</Button>
+            </span>
+          </div>
         </section>
       ) : null}
     </div>
