@@ -11,8 +11,8 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import * as SecureStore from "expo-secure-store";
 import { registerPushDevice, unregisterPushDevice } from "@/lib/push-notifications";
+import { clearRefreshToken, getRefreshToken, saveRefreshToken } from "@/lib/refresh-token-storage";
 import {
   ApiErrorSchema,
   ApiSuccessSchema,
@@ -24,8 +24,6 @@ import {
 import { CoachWorkspace } from "@/features/coach-workspace";
 import { ParentWorkspace } from "@/features/parent-workspace";
 import { mobileFetch } from "@/lib/api";
-const REFRESH_KEY = "sportdesk.refresh-token";
-
 class MobileApiError extends Error {
   status: number;
 
@@ -89,15 +87,14 @@ export default function IndexScreen() {
     let active = true;
     async function restore() {
       try {
-        const refreshToken = await SecureStore.getItemAsync(REFRESH_KEY);
+        const refreshToken = await getRefreshToken();
         if (!refreshToken) return;
         const nextAuth = await renewSession(refreshToken);
-        if (nextAuth.refreshToken)
-          await SecureStore.setItemAsync(REFRESH_KEY, nextAuth.refreshToken);
+        if (nextAuth.refreshToken) await saveRefreshToken(nextAuth.refreshToken);
         if (active) setAuth(nextAuth);
       } catch (caught) {
         if (caught instanceof MobileApiError && [400, 401, 403].includes(caught.status)) {
-          await SecureStore.deleteItemAsync(REFRESH_KEY);
+          await clearRefreshToken();
         } else if (active) {
           setError(caught instanceof Error ? caught.message : "Could not restore your session.");
         }
@@ -118,7 +115,7 @@ export default function IndexScreen() {
     try {
       const nextAuth = await requestLogin(email.trim(), password);
       if (!nextAuth.refreshToken) throw new Error("The server did not issue a mobile session.");
-      await SecureStore.setItemAsync(REFRESH_KEY, nextAuth.refreshToken);
+      await saveRefreshToken(nextAuth.refreshToken);
       setAuth(nextAuth);
       setPassword("");
     } catch (caught) {
@@ -173,7 +170,7 @@ export default function IndexScreen() {
         });
       }
     } finally {
-      await SecureStore.deleteItemAsync(REFRESH_KEY);
+      await clearRefreshToken();
       setAuth(null);
     }
   }

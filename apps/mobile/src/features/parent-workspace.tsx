@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -19,7 +21,6 @@ import {
   ProgressEntrySchema,
   UpdatedRecordSchema,
   UpdateParentProfileRequestSchema,
-  UpdateParentStudentRequestSchema,
   type AuthData,
   type ParentAnnouncement,
   type ParentAttendance,
@@ -61,6 +62,7 @@ const navItems = [
 ] as const;
 type Tab = (typeof navItems)[number]["id"] | "announcements";
 type DetailKey = "schedule" | "attendance" | "progress" | "payments";
+type AccountPage = "overview" | "personal" | "children" | "security";
 
 const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -108,15 +110,63 @@ function SectionHeading({
   );
 }
 
-function BellIcon({ active }: { active: boolean }) {
+function BellIcon({ active, animated }: { active: boolean; animated: boolean }) {
+  const pulse = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!animated) {
+      pulse.stopAnimation();
+      pulse.setValue(0);
+      return;
+    }
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 240,
+          easing: Easing.out(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0,
+          duration: 300,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.delay(1800),
+      ]),
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [animated, pulse]);
+
+  const scale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] });
   return (
-    <View style={styles.bell}>
-      <View style={[styles.bellWaveLeft, active && styles.bellWaveActive]} />
-      <View style={[styles.bellWaveRight, active && styles.bellWaveActive]} />
-      <View style={[styles.bellBody, active && styles.bellBodyActive]} />
-      <View style={[styles.bellBase, active && styles.bellBaseActive]} />
+    <Animated.View style={[styles.bell, { transform: [{ scale }] }]}>
+      <View style={[styles.bellDome, active && styles.bellDomeActive]} />
       <View style={[styles.bellClapper, active && styles.bellClapperActive]} />
-    </View>
+      <View style={[styles.bellLip, active && styles.bellLipActive]} />
+    </Animated.View>
+  );
+}
+
+function SettingsRow({
+  title,
+  detail,
+  onPress,
+}: {
+  title: string;
+  detail: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable accessibilityRole="button" onPress={onPress} style={styles.settingsRow}>
+      <View style={styles.rowMain}>
+        <Text style={styles.settingsRowTitle}>{title}</Text>
+        <Text style={styles.settingsRowDetail}>{detail}</Text>
+      </View>
+      <Text style={styles.settingsChevron}>›</Text>
+    </Pressable>
   );
 }
 
@@ -315,6 +365,9 @@ export function ParentWorkspace({
   const [students, setStudents] = useState<ParentStudent[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("home");
+  const [accountPage, setAccountPage] = useState<AccountPage>("overview");
+  const [attendanceChartWidth, setAttendanceChartWidth] = useState(0);
+  const [selectedAttendanceWeek, setSelectedAttendanceWeek] = useState<number | null>(null);
   const [schedules, setSchedules] = useState<ParentSchedule[]>([]);
   const [attendance, setAttendance] = useState<ParentAttendance[]>([]);
   const [progress, setProgress] = useState<ProgressEntry[]>([]);
@@ -332,13 +385,15 @@ export function ParentWorkspace({
   const [sectionErrors, setSectionErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [profileName, setProfileName] = useState(auth.user.displayName);
-  const [profilePhone, setProfilePhone] = useState("");
-  const [studentFirstName, setStudentFirstName] = useState("");
-  const [studentLastName, setStudentLastName] = useState("");
+  const [registeredPhone, setRegisteredPhone] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [formMessage, setFormMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setSelectedAttendanceWeek(null);
+  }, [selectedId]);
 
   const loadStudents = useCallback(async () => {
     const result = await requestMobileData(
@@ -410,7 +465,7 @@ export function ParentWorkspace({
       .then((profile) => {
         if (active) {
           setProfileName(profile.displayName);
-          setProfilePhone(profile.phone ?? "");
+          setRegisteredPhone(profile.phone ?? "");
         }
       })
       .catch((caught: unknown) => {
@@ -434,6 +489,14 @@ export function ParentWorkspace({
       setAttendance([]);
       setProgress([]);
       setFinance(null);
+      setSectionLoading({ schedule: false, attendance: false, progress: false, payments: false });
+      setSectionErrors((previous) => ({
+        ...previous,
+        schedule: "",
+        attendance: "",
+        progress: "",
+        payments: "",
+      }));
       return;
     }
     let active = true;
@@ -541,18 +604,68 @@ export function ParentWorkspace({
   const unreadCount = announcements.filter((item) => !item.readAt).length;
   const childName = (selected?.firstName ?? profileName.split(" ")[0]) || "there";
   const attendanceWeeks = useMemo(() => {
-    const weeks = [0, 0, 0, 0];
+    const weeks = Array.from({ length: 4 }, () => ({ attended: 0, missed: 0, excused: 0 }));
     const now = Date.now();
     for (const record of attendance) {
       const age = Math.floor((now - new Date(record.scheduledStart).getTime()) / 86_400_000);
       if (age < 0 || age >= 28) continue;
       const weekIndex = 3 - Math.floor(age / 7);
-      if (record.status === "present" || record.status === "late")
-        weeks[weekIndex] = (weeks[weekIndex] ?? 0) + 1;
+      const week = weeks[weekIndex];
+      if (!week) continue;
+      if (record.status === "present" || record.status === "late") week.attended += 1;
+      if (record.status === "absent") week.missed += 1;
+      if (record.status === "excused") week.excused += 1;
     }
     return weeks;
   }, [attendance]);
-  const maxWeekCount = Math.max(1, ...attendanceWeeks);
+  const hasRecentAttendance = attendanceWeeks.some((week) => week.attended + week.missed > 0);
+  const recentAttendanceTotals = attendanceWeeks.map((week) => ({
+    attended: week.attended,
+    eligible: week.attended + week.missed,
+  }));
+  const earlyWindow = recentAttendanceTotals.slice(0, 2).reduce(
+    (total, week) => ({
+      attended: total.attended + week.attended,
+      eligible: total.eligible + week.eligible,
+    }),
+    { attended: 0, eligible: 0 },
+  );
+  const recentWindow = recentAttendanceTotals.slice(2).reduce(
+    (total, week) => ({
+      attended: total.attended + week.attended,
+      eligible: total.eligible + week.eligible,
+    }),
+    { attended: 0, eligible: 0 },
+  );
+  const recentFourWeekCount = recentAttendanceTotals.reduce(
+    (total, week) => total + week.eligible,
+    0,
+  );
+  const recentFourWeekRate = recentFourWeekCount
+    ? Math.round(
+        (recentAttendanceTotals.reduce((total, week) => total + week.attended, 0) /
+          recentFourWeekCount) *
+          100,
+      )
+    : null;
+  const attendanceInsight = !hasRecentAttendance
+    ? attendance.length
+      ? `No attendance recorded in the last 4 weeks. ${attendance.length} earlier ${attendance.length === 1 ? "session is" : "sessions are"} in the history below.`
+      : "No attendance has been recorded yet. Once sessions are marked, this will show how regularly classes are attended."
+    : earlyWindow.eligible && recentWindow.eligible
+      ? (() => {
+          const earlyRate = (earlyWindow.attended / earlyWindow.eligible) * 100;
+          const recentRate = (recentWindow.attended / recentWindow.eligible) * 100;
+          const change = Math.round(recentRate - earlyRate);
+          const comparison =
+            change > 0
+              ? `up ${change} percentage points`
+              : change < 0
+                ? `down ${Math.abs(change)} percentage points`
+                : "holding steady";
+          return `Attendance is ${comparison} in the last 2 weeks (${recentWindow.attended}/${recentWindow.eligible} sessions), compared with the 2 weeks before.`;
+        })()
+      : `${recentFourWeekRate}% attendance across ${recentFourWeekCount} marked sessions in the last 4 weeks. More sessions will make the trend clearer.`;
 
   async function markAnnouncementRead(item: ParentAnnouncement) {
     setSectionErrors((previous) => ({ ...previous, announcements: "" }));
@@ -583,7 +696,6 @@ export function ParentWorkspace({
     try {
       const input = UpdateParentProfileRequestSchema.parse({
         displayName: profileName,
-        phone: profilePhone.trim() || null,
       });
       await requestMobileData(
         "/parent/me/profile",
@@ -599,40 +711,6 @@ export function ParentWorkspace({
       setFormMessage("Your details are up to date.");
     } catch (caught) {
       setFormMessage(caught instanceof Error ? caught.message : "Could not update your details.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function saveStudentProfile() {
-    if (!selected) return;
-    setSaving(true);
-    setFormMessage(null);
-    try {
-      const input = UpdateParentStudentRequestSchema.parse({
-        firstName: studentFirstName || selected.firstName,
-        lastName: studentLastName || selected.lastName,
-      });
-      await requestMobileData(
-        `/parent/students/${selected.id}/profile`,
-        (value) => UpdatedRecordSchema.parse(value),
-        auth,
-        onAuthUpdate,
-        {
-          method: "PATCH",
-          body: JSON.stringify(input),
-        },
-      );
-      setStudents((items) =>
-        items.map((student) => (student.id === selected.id ? { ...student, ...input } : student)),
-      );
-      setStudentFirstName(input.firstName);
-      setStudentLastName(input.lastName);
-      setFormMessage("Your child’s details are up to date.");
-    } catch (caught) {
-      setFormMessage(
-        caught instanceof Error ? caught.message : "Could not update your child’s details.",
-      );
     } finally {
       setSaving(false);
     }
@@ -929,7 +1007,24 @@ export function ParentWorkspace({
           {sectionErrors.attendance}
         </Text>
       );
-    const chartLabels = ["3 wks ago", "2 wks ago", "Last week", "This week"];
+    const chartPlotHeight = 148;
+    const chartWeeks = attendanceWeeks.map((week, index) => {
+      const eligible = week.attended + week.missed;
+      const rate = eligible ? (week.attended / eligible) * 100 : null;
+      const anchor = new Date(Date.now() - (3 - index) * 7 * 86_400_000).toISOString();
+      return {
+        ...week,
+        eligible,
+        rate,
+        date: academyDate(anchor, timeZone, { day: "numeric", month: "short" }),
+      };
+    });
+    const chartPoints = chartWeeks.map((week, index) => ({
+      x: 8 + (Math.max(0, attendanceChartWidth - 16) * index) / 3,
+      y: week.rate === null ? null : chartPlotHeight - (week.rate / 100) * chartPlotHeight,
+    }));
+    const selectedWeek =
+      selectedAttendanceWeek === null ? null : chartWeeks[selectedAttendanceWeek];
     return (
       <>
         <View style={styles.pageIntroCard}>
@@ -939,70 +1034,197 @@ export function ParentWorkspace({
             A clear look at the sessions {childName} has made it to.
           </Text>
         </View>
-        {attendance.length ? (
-          <>
-            <View style={styles.attendanceStats}>
-              <View style={styles.attendanceMainStat}>
-                <Text style={styles.statEyebrow}>ATTENDANCE RATE</Text>
-                <Text style={styles.attendanceRate}>
-                  {attendanceRate === null ? "—" : `${attendanceRate}%`}
-                </Text>
-                <Text style={styles.statCaption}>
-                  across {attendance.length} recorded{" "}
-                  {attendance.length === 1 ? "session" : "sessions"}
-                </Text>
-                <View style={styles.segmentTrack}>
-                  <View style={[styles.segmentGood, { flex: attendedCount }]} />
-                  {absentCount ? (
-                    <View style={[styles.segmentMissed, { flex: absentCount }]} />
-                  ) : null}
-                  {excusedCount ? (
-                    <View style={[styles.segmentExcused, { flex: excusedCount }]} />
-                  ) : null}
-                </View>
-                <View style={styles.legendRow}>
-                  <View style={styles.legendItem}>
-                    <View style={styles.legendDotGood} />
-                    <Text style={styles.legendLabel}>Attended {attendedCount}</Text>
-                  </View>
-                  <View style={styles.legendItem}>
-                    <View style={styles.legendDotMissed} />
-                    <Text style={styles.legendLabel}>Missed {absentCount}</Text>
-                  </View>
-                </View>
+        <View style={styles.attendanceKpis}>
+          <View style={styles.attendanceKpi}>
+            <Text style={styles.kpiLabel}>ATTENDANCE</Text>
+            <Text style={styles.kpiRate}>
+              {attendanceRate === null ? "—" : `${attendanceRate}%`}
+            </Text>
+          </View>
+          <View style={styles.attendanceKpi}>
+            <Text style={styles.kpiLabel}>ATTENDED</Text>
+            <Text style={[styles.kpiCount, styles.kpiGood]}>{attendedCount}</Text>
+          </View>
+          <View style={styles.attendanceKpi}>
+            <Text style={styles.kpiLabel}>MISSED</Text>
+            <Text style={[styles.kpiCount, styles.kpiMissed]}>{absentCount}</Text>
+          </View>
+        </View>
+
+        <View style={styles.attendanceMainStat}>
+          <View style={styles.chartHeadingRow}>
+            <View>
+              <Text style={styles.chartTitle}>Session breakdown</Text>
+              <Text style={styles.chartCaption}>
+                {attendance.length
+                  ? `Across ${attendance.length} recorded sessions`
+                  : "No sessions recorded yet"}
+              </Text>
+            </View>
+            {excusedCount > 0 ? (
+              <Text style={styles.excusedSummary}>{excusedCount} excused</Text>
+            ) : null}
+          </View>
+          <View style={styles.segmentTrack}>
+            {attendedCount > 0 ? (
+              <View style={[styles.segmentGood, { flex: attendedCount }]} />
+            ) : null}
+            {absentCount > 0 ? (
+              <View style={[styles.segmentMissed, { flex: absentCount }]} />
+            ) : null}
+            {excusedCount > 0 ? (
+              <View style={[styles.segmentExcused, { flex: excusedCount }]} />
+            ) : null}
+          </View>
+          <View style={styles.legendRow}>
+            <View style={styles.legendItem}>
+              <View style={styles.legendDotGood} />
+              <Text style={styles.legendLabel}>Present / late</Text>
+            </View>
+            <View style={styles.legendItem}>
+              <View style={styles.legendDotMissed} />
+              <Text style={styles.legendLabel}>Absent</Text>
+            </View>
+            {excusedCount > 0 ? (
+              <View style={styles.legendItem}>
+                <View style={styles.legendDotExcused} />
+                <Text style={styles.legendLabel}>Excused</Text>
               </View>
-              <View style={styles.weeklyChart}>
-                <Text style={styles.chartTitle}>Weekly sessions</Text>
-                <Text style={styles.chartCaption}>Attended in the last 4 weeks</Text>
-                <View style={styles.chartBars}>
-                  {attendanceWeeks.map((count, index) => (
-                    <View key={chartLabels[index]} style={styles.chartColumn}>
-                      <Text style={styles.chartCount}>{count || ""}</Text>
-                      <View style={styles.chartBarBase}>
-                        <View
-                          style={[
-                            styles.chartBar,
-                            { height: `${Math.max(8, (count / maxWeekCount) * 100)}%` },
-                            index === 3 && styles.chartBarCurrent,
-                          ]}
-                        />
-                      </View>
-                      <Text style={styles.chartWeekLabel}>{["3w", "2w", "1w", "Now"][index]}</Text>
-                    </View>
+            ) : null}
+          </View>
+        </View>
+
+        <View style={styles.weeklyChart}>
+          <Text style={styles.chartTitle}>4-week attendance trend</Text>
+          <Text style={styles.chartCaption}>Present or late ÷ sessions not excused</Text>
+          <View style={styles.attendanceInsight}>
+            <Text style={styles.attendanceInsightLabel}>
+              {hasRecentAttendance
+                ? `${recentFourWeekRate}% · ${recentFourWeekCount} sessions`
+                : "Attendance insight"}
+            </Text>
+            <Text style={styles.attendanceInsightText}>{attendanceInsight}</Text>
+          </View>
+          {hasRecentAttendance ? (
+            <>
+              <View style={styles.chartGraph}>
+                <View style={styles.chartYAxis}>
+                  {[100, 75, 50, 25, 0].map((label, index) => (
+                    <Text
+                      key={label}
+                      style={[styles.chartAxisLabel, { top: (chartPlotHeight * index) / 4 }]}
+                    >
+                      {label}
+                    </Text>
                   ))}
                 </View>
+                <View
+                  style={[styles.chartPlot, { height: chartPlotHeight }]}
+                  onLayout={(event) => {
+                    const width = event.nativeEvent.layout.width;
+                    if (width !== attendanceChartWidth) setAttendanceChartWidth(width);
+                  }}
+                >
+                  {[0, 25, 50, 75, 100].map((value) => (
+                    <View
+                      key={`horizontal-${value}`}
+                      style={[styles.chartHorizontalGrid, { top: chartPlotHeight * (value / 100) }]}
+                    />
+                  ))}
+                  {chartPoints.map((point, index) => (
+                    <View
+                      key={`vertical-${index}`}
+                      style={[styles.chartVerticalGrid, { left: point.x }]}
+                    />
+                  ))}
+                  {chartPoints.slice(0, -1).map((point, index) => {
+                    const nextPoint = chartPoints[index + 1];
+                    if (point.y === null || !nextPoint || nextPoint.y === null) return null;
+                    const dx = nextPoint.x - point.x;
+                    const dy = nextPoint.y - point.y;
+                    const length = Math.sqrt(dx * dx + dy * dy);
+                    const angle = `${(Math.atan2(dy, dx) * 180) / Math.PI}deg`;
+                    return (
+                      <View
+                        key={`trend-${index}`}
+                        style={[
+                          styles.chartTrendLine,
+                          {
+                            left: point.x,
+                            top: (point.y + nextPoint.y) / 2 - 1,
+                            width: length,
+                            transform: [{ rotate: angle }],
+                          },
+                        ]}
+                      />
+                    );
+                  })}
+                  {chartPoints.map((point, index) => {
+                    const week = chartWeeks[index];
+                    if (point.y === null || !week) return null;
+                    return (
+                      <Pressable
+                        key={`point-${index}`}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${week.date}: ${week.attended} present out of ${week.eligible} marked sessions, ${week.rate?.toFixed(1)} percent attendance`}
+                        onPress={() => setSelectedAttendanceWeek(index)}
+                        style={[styles.chartPointHit, { left: point.x - 12, top: point.y - 12 }]}
+                      >
+                        <View style={styles.chartPoint} />
+                      </Pressable>
+                    );
+                  })}
+                  {selectedWeek && selectedAttendanceWeek !== null
+                    ? (() => {
+                        const point = chartPoints[selectedAttendanceWeek];
+                        if (!point || point.y === null) return null;
+                        const tooltipWidth = 132;
+                        const tooltipLeft = Math.max(
+                          0,
+                          Math.min(point.x - tooltipWidth / 2, attendanceChartWidth - tooltipWidth),
+                        );
+                        const tooltipTop = Math.max(
+                          4,
+                          Math.min(point.y - 70, chartPlotHeight - 66),
+                        );
+                        return (
+                          <View
+                            style={[styles.chartTooltip, { left: tooltipLeft, top: tooltipTop }]}
+                          >
+                            <Text style={styles.tooltipDate}>{selectedWeek.date}</Text>
+                            <Text style={styles.tooltipPresent}>
+                              Attended: {selectedWeek.attended}/{selectedWeek.eligible}
+                            </Text>
+                            <Text style={styles.tooltipRate}>{selectedWeek.rate?.toFixed(1)}%</Text>
+                          </View>
+                        );
+                      })()
+                    : null}
+                </View>
               </View>
+              <View style={styles.chartXAxis}>
+                {chartWeeks.map((week, index) => (
+                  <Text key={`date-${index}`} style={styles.chartDateLabel}>
+                    {week.date}
+                  </Text>
+                ))}
+              </View>
+              <View style={styles.chartLegend}>
+                <View style={styles.chartLegendDot} />
+                <Text style={styles.chartLegendText}>Attendance %</Text>
+              </View>
+            </>
+          ) : (
+            <View style={styles.chartEmpty}>
+              <Text style={styles.chartEmptyText}>
+                No eligible attendance marks in the last 4 weeks.
+              </Text>
             </View>
-            <SectionHeading title="Recent sessions" detail={`${attendance.length} total`} />
-            <AttendanceRows records={attendance} timeZone={timeZone} />
-          </>
-        ) : (
-          <EmptyState
-            symbol="✓"
-            title="The first class is ahead"
-            detail="Once a coach records attendance, you’ll see the attendance rate and session history here."
-          />
-        )}
+          )}
+        </View>
+
+        <SectionHeading title="Session history" detail={`${attendance.length} total`} />
+        <AttendanceRows records={attendance} timeZone={timeZone} />
       </>
     );
   }
@@ -1172,29 +1394,142 @@ export function ParentWorkspace({
   }
 
   function renderAccount() {
+    const goBack = () => {
+      setFormMessage(null);
+      setAccountPage("overview");
+    };
+    if (accountPage === "overview") {
+      return (
+        <>
+          <View style={styles.accountHeader}>
+            <ChildAvatar size={52} />
+            <View style={styles.rowMain}>
+              <Text style={styles.accountChildName}>{profileName || auth.user.displayName}</Text>
+              <Text style={styles.accountCaption}>Parent account</Text>
+              <Text style={styles.accountEmail}>{auth.user.email}</Text>
+            </View>
+          </View>
+
+          <View style={styles.formCard}>
+            <SectionHeading title="My children" detail={`${students.length} linked`} />
+            {students.length ? (
+              students.map((student) => (
+                <Pressable
+                  key={student.id}
+                  accessibilityRole="button"
+                  onPress={() => {
+                    setSelectedId(student.id);
+                    setAccountPage("children");
+                  }}
+                  style={styles.childSettingRow}
+                >
+                  <ChildAvatar size={38} />
+                  <View style={styles.rowMain}>
+                    <Text style={styles.settingsRowTitle}>
+                      {student.firstName} {student.lastName}
+                    </Text>
+                    <Text style={styles.settingsRowDetail}>
+                      {student.batchNames.join(" · ") || "Student profile"}
+                    </Text>
+                  </View>
+                  <Text style={styles.settingsChevron}>›</Text>
+                </Pressable>
+              ))
+            ) : (
+              <Text style={styles.formHint}>
+                No student profiles are linked to this account yet.
+              </Text>
+            )}
+          </View>
+
+          <View style={styles.formCard}>
+            <SectionHeading title="Account & preferences" />
+            <SettingsRow
+              title="Personal information"
+              detail="Name, phone and email"
+              onPress={() => setAccountPage("personal")}
+            />
+            <SettingsRow
+              title="Security"
+              detail="Change your password"
+              onPress={() => setAccountPage("security")}
+            />
+            <SettingsRow
+              title="Notifications"
+              detail="Academy announcements and updates"
+              onPress={() => setTab("announcements")}
+            />
+            <View style={styles.supportNote}>
+              <Text style={styles.supportTitle}>Help & support</Text>
+              <Text style={styles.settingsRowDetail}>
+                For help with your account, contact {auth.user.academyName}.
+              </Text>
+            </View>
+          </View>
+
+          <Pressable accessibilityRole="button" onPress={onLogout} style={styles.signOutButton}>
+            <Text style={styles.signOutText}>Log out</Text>
+          </Pressable>
+        </>
+      );
+    }
+
     return (
       <>
-        <View style={styles.accountHeader}>
-          <ChildAvatar size={46} />
-          <View style={styles.rowMain}>
-            <Text style={styles.accountChildName}>
-              {selected ? `${selected.firstName} ${selected.lastName}` : auth.user.academyName}
-            </Text>
-            <Text style={styles.accountCaption}>Family account · {auth.user.academyName}</Text>
-          </View>
-        </View>
+        <Pressable accessibilityRole="button" onPress={goBack} style={styles.settingsBack}>
+          <Text style={styles.settingsBackText}>‹ Your account</Text>
+        </Pressable>
 
-        {selected ? (
+        {accountPage === "personal" ? (
           <View style={styles.formCard}>
-            <SectionHeading title={`${selected.firstName}’s details`} />
+            {profileLoading ? (
+              <ActivityIndicator style={styles.inlineLoader} color={palette.forest} />
+            ) : (
+              <>
+                {sectionErrors.profile ? (
+                  <Text accessibilityRole="alert" style={styles.error}>
+                    {sectionErrors.profile}
+                  </Text>
+                ) : null}
+                <Text style={styles.inputLabel}>Full name</Text>
+                <TextInput
+                  accessibilityLabel="Your name"
+                  value={profileName}
+                  onChangeText={setProfileName}
+                  placeholder="Your name"
+                  style={styles.input}
+                />
+                <Text style={styles.inputLabel}>Mobile number</Text>
+                <Text style={styles.emailValue}>{registeredPhone || "Not provided"}</Text>
+                <Text style={styles.formHint}>
+                  Changing a registered number requires verification. Contact the academy for help.
+                </Text>
+                <Text style={styles.inputLabel}>Registered email</Text>
+                <Text style={styles.emailValue}>{auth.user.email}</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={saving}
+                  onPress={() => void saveParentProfile()}
+                  style={styles.secondaryButton}
+                >
+                  {saving ? (
+                    <ActivityIndicator color={palette.forest} />
+                  ) : (
+                    <Text style={styles.secondaryButtonText}>Save changes</Text>
+                  )}
+                </Pressable>
+              </>
+            )}
+          </View>
+        ) : null}
+
+        {accountPage === "children" && selected ? (
+          <>
             {students.length > 1 ? (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.accountChildChoices}
-              >
+              <View style={styles.formCard}>
+                <SectionHeading title="Choose a child" />
                 {students.map((student) => {
-                  const active = student.id === selectedId;
+                  const active = student.id === selected.id;
                   return (
                     <Pressable
                       key={student.id}
@@ -1202,8 +1537,6 @@ export function ParentWorkspace({
                       accessibilityState={{ selected: active }}
                       onPress={() => {
                         setSelectedId(student.id);
-                        setStudentFirstName(student.firstName);
-                        setStudentLastName(student.lastName);
                       }}
                       style={[styles.accountChildChoice, active && styles.accountChildChoiceActive]}
                     >
@@ -1213,131 +1546,111 @@ export function ParentWorkspace({
                           active && styles.accountChildChoiceTextActive,
                         ]}
                       >
-                        {student.firstName}
+                        {student.firstName} {student.lastName}
                       </Text>
                     </Pressable>
                   );
                 })}
-              </ScrollView>
+              </View>
             ) : null}
-            <Text style={styles.inputLabel}>First name</Text>
+            <View style={styles.formCard}>
+              <View style={styles.studentProfileSummary}>
+                <ChildAvatar size={48} />
+                <View style={styles.rowMain}>
+                  <Text style={styles.accountChildName}>
+                    {selected.firstName} {selected.lastName}
+                  </Text>
+                  <Text style={styles.accountCaption}>
+                    {selected.batchNames.join(" · ") || "Student profile"}
+                  </Text>
+                  <Text style={styles.accountCaption}>{selected.status}</Text>
+                </View>
+              </View>
+              <SectionHeading title="Official student details" />
+              <View style={styles.readOnlyField}>
+                <Text style={styles.inputLabel}>Full name</Text>
+                <Text style={styles.readOnlyValue}>
+                  {selected.firstName} {selected.lastName}
+                </Text>
+              </View>
+              <View style={styles.correctionNote}>
+                <Text style={styles.supportTitle}>Need a correction?</Text>
+                <Text style={styles.settingsRowDetail}>
+                  Student identity and enrollment details are managed by the academy. Contact{" "}
+                  {auth.user.academyName} to request a change.
+                </Text>
+              </View>
+            </View>
+            <View style={styles.formCard}>
+              <SectionHeading title="Student information" />
+              <SettingsRow
+                title="Schedule"
+                detail="View upcoming training sessions"
+                onPress={() => setTab("schedule")}
+              />
+              <SettingsRow
+                title="Attendance"
+                detail="View attendance history"
+                onPress={() => setTab("attendance")}
+              />
+              <SettingsRow
+                title="Progress"
+                detail="View published progress updates"
+                onPress={() => setTab("progress")}
+              />
+              <SettingsRow
+                title="Fees & receipts"
+                detail="View invoices and payment history"
+                onPress={() => setTab("payments")}
+              />
+            </View>
+          </>
+        ) : null}
+
+        {accountPage === "security" ? (
+          <View style={styles.formCard}>
+            <Text style={styles.formHint}>
+              Choose a new password with at least 14 characters. You’ll be signed out after it
+              changes.
+            </Text>
+            <Text style={styles.inputLabel}>Current password</Text>
             <TextInput
-              accessibilityLabel="Child’s first name"
-              value={studentFirstName || selected.firstName}
-              onChangeText={setStudentFirstName}
-              placeholder="First name"
+              accessibilityLabel="Current password"
+              value={currentPassword}
+              onChangeText={setCurrentPassword}
+              placeholder="Current password"
+              secureTextEntry
               style={styles.input}
             />
-            <Text style={styles.inputLabel}>Last name</Text>
+            <Text style={styles.inputLabel}>New password</Text>
             <TextInput
-              accessibilityLabel="Child’s last name"
-              value={studentLastName || selected.lastName}
-              onChangeText={setStudentLastName}
-              placeholder="Last name"
+              accessibilityLabel="New password"
+              value={newPassword}
+              onChangeText={setNewPassword}
+              placeholder="New password"
+              secureTextEntry
               style={styles.input}
             />
             <Pressable
               accessibilityRole="button"
               disabled={saving}
-              onPress={() => void saveStudentProfile()}
-              style={styles.primaryButton}
+              onPress={() => void changePassword()}
+              style={styles.secondaryButton}
             >
               {saving ? (
-                <ActivityIndicator color={palette.white} />
+                <ActivityIndicator color={palette.forest} />
               ) : (
-                <Text style={styles.primaryButtonText}>Save child’s details</Text>
+                <Text style={styles.secondaryButtonText}>Update password</Text>
               )}
             </Pressable>
           </View>
         ) : null}
-
-        <View style={styles.formCard}>
-          <SectionHeading title="Your details" />
-          {profileLoading ? (
-            <ActivityIndicator style={styles.inlineLoader} color={palette.forest} />
-          ) : (
-            <>
-              {sectionErrors.profile ? (
-                <Text accessibilityRole="alert" style={styles.error}>
-                  {sectionErrors.profile}
-                </Text>
-              ) : null}
-              <Text style={styles.inputLabel}>Your name</Text>
-              <TextInput
-                accessibilityLabel="Your name"
-                value={profileName}
-                onChangeText={setProfileName}
-                placeholder="Your name"
-                style={styles.input}
-              />
-              <Text style={styles.inputLabel}>Phone number</Text>
-              <TextInput
-                accessibilityLabel="Phone number"
-                value={profilePhone}
-                onChangeText={setProfilePhone}
-                placeholder="Add a phone number"
-                keyboardType="phone-pad"
-                style={styles.input}
-              />
-              <Text style={styles.inputLabel}>Email</Text>
-              <Text style={styles.emailValue}>{auth.user.email}</Text>
-              <Pressable
-                accessibilityRole="button"
-                disabled={saving}
-                onPress={() => void saveParentProfile()}
-                style={styles.secondaryButton}
-              >
-                {saving ? (
-                  <ActivityIndicator color={palette.forest} />
-                ) : (
-                  <Text style={styles.secondaryButtonText}>Save your details</Text>
-                )}
-              </Pressable>
-            </>
-          )}
-        </View>
-
-        <View style={styles.formCard}>
-          <SectionHeading title="Password & security" />
-          <Text style={styles.formHint}>Choose a new password with at least 14 characters.</Text>
-          <TextInput
-            accessibilityLabel="Current password"
-            value={currentPassword}
-            onChangeText={setCurrentPassword}
-            placeholder="Current password"
-            secureTextEntry
-            style={styles.input}
-          />
-          <TextInput
-            accessibilityLabel="New password"
-            value={newPassword}
-            onChangeText={setNewPassword}
-            placeholder="New password"
-            secureTextEntry
-            style={styles.input}
-          />
-          <Pressable
-            accessibilityRole="button"
-            disabled={saving}
-            onPress={() => void changePassword()}
-            style={styles.secondaryButton}
-          >
-            {saving ? (
-              <ActivityIndicator color={palette.forest} />
-            ) : (
-              <Text style={styles.secondaryButtonText}>Update password</Text>
-            )}
-          </Pressable>
-        </View>
 
         {formMessage ? (
           <Text accessibilityRole="alert" style={styles.formMessage}>
             {formMessage}
           </Text>
         ) : null}
-        <Pressable accessibilityRole="button" onPress={onLogout} style={styles.signOutButton}>
-          <Text style={styles.signOutText}>Sign out</Text>
-        </Pressable>
       </>
     );
   }
@@ -1354,7 +1667,13 @@ export function ParentWorkspace({
             : tab === "payments"
               ? "Fees"
               : tab === "profile"
-                ? "Account"
+                ? accountPage === "overview"
+                  ? "Your account"
+                  : accountPage === "personal"
+                    ? "Personal information"
+                    : accountPage === "children"
+                      ? "My children"
+                      : "Security"
                 : "Schedule";
 
   function renderContent() {
@@ -1406,7 +1725,7 @@ export function ParentWorkspace({
             tab === "announcements" && styles.notificationButtonActive,
           ]}
         >
-          <BellIcon active={tab === "announcements"} />
+          <BellIcon active={tab === "announcements"} animated={unreadCount > 0} />
           {unreadCount > 0 ? <View style={styles.unreadDot} /> : null}
         </Pressable>
       </View>
@@ -1425,7 +1744,13 @@ export function ParentWorkspace({
               {tab === "home" && selected
                 ? "A little look at their academy week."
                 : tab === "profile"
-                  ? "A few details for your family account."
+                  ? accountPage === "overview"
+                    ? "Manage your family account and preferences."
+                    : accountPage === "personal"
+                      ? "Your contact details and registered email."
+                      : accountPage === "children"
+                        ? "Profiles and information for your children."
+                        : "Keep your account protected."
                   : selected
                     ? `${selected.firstName} · ${auth.user.academyName}`
                     : auth.user.academyName}
@@ -1453,7 +1778,10 @@ export function ParentWorkspace({
               key={item.id}
               accessibilityRole="button"
               accessibilityState={{ selected: active }}
-              onPress={() => setTab(item.id)}
+              onPress={() => {
+                if (item.id === "profile") setAccountPage("overview");
+                setTab(item.id);
+              }}
               style={styles.navButton}
             >
               <View style={[styles.navGlyphWrap, active && styles.navGlyphWrapActive]}>
@@ -1493,68 +1821,53 @@ const styles = StyleSheet.create({
   academyName: { marginTop: 2, color: palette.muted, fontSize: 11 },
   notificationButton: {
     position: "relative",
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: palette.card,
     borderWidth: 1,
-    borderColor: palette.line,
+    borderColor: "#DCE4F0",
   },
   notificationButtonActive: { backgroundColor: palette.mint, borderColor: palette.mintDeep },
-  bell: { width: 24, height: 23, alignItems: "center", justifyContent: "flex-end" },
-  bellWaveLeft: {
+  bell: { width: 26, height: 28, alignItems: "center", justifyContent: "center" },
+  bellDome: {
     position: "absolute",
-    left: 0,
-    top: 7,
-    width: 5,
-    height: 10,
-    borderLeftWidth: 1.5,
-    borderColor: "#72CDD0",
-    borderTopLeftRadius: 6,
-    borderBottomLeftRadius: 6,
-  },
-  bellWaveRight: {
-    position: "absolute",
-    right: 0,
-    top: 7,
-    width: 5,
-    height: 10,
-    borderRightWidth: 1.5,
-    borderColor: "#72CDD0",
-    borderTopRightRadius: 6,
-    borderBottomRightRadius: 6,
-  },
-  bellWaveActive: { borderColor: palette.forest },
-  bellBody: {
-    width: 14,
-    height: 13,
-    borderWidth: 1.7,
-    borderColor: palette.text,
-    borderTopLeftRadius: 7,
-    borderTopRightRadius: 7,
+    top: 2,
+    width: 16,
+    height: 19,
+    borderWidth: 2,
+    borderColor: "#46566A",
+    borderTopLeftRadius: 9,
+    borderTopRightRadius: 9,
+    borderBottomLeftRadius: 3,
+    borderBottomRightRadius: 3,
     borderBottomWidth: 0,
   },
-  bellBodyActive: { borderColor: palette.forest },
-  bellBase: {
+  bellDomeActive: { borderColor: palette.forest },
+  bellLip: {
     position: "absolute",
-    bottom: 2,
-    width: 17,
-    height: 3,
-    borderRadius: 3,
-    backgroundColor: palette.text,
+    bottom: 3,
+    width: 23,
+    height: 7,
+    borderWidth: 2,
+    borderColor: "#46566A",
+    borderRadius: 5,
+    backgroundColor: palette.card,
   },
-  bellBaseActive: { backgroundColor: palette.forest },
+  bellLipActive: { borderColor: palette.forest },
   bellClapper: {
     position: "absolute",
     bottom: 0,
-    width: 4,
-    height: 3,
+    width: 5,
+    height: 5,
+    borderWidth: 1.7,
     borderRadius: 3,
-    backgroundColor: "#72CDD0",
+    borderColor: "#46566A",
+    backgroundColor: palette.card,
   },
-  bellClapperActive: { backgroundColor: palette.forest },
+  bellClapperActive: { borderColor: palette.forest },
   avatarArt: {
     overflow: "hidden",
     alignItems: "center",
@@ -1833,7 +2146,22 @@ const styles = StyleSheet.create({
     fontSize: 8,
     fontWeight: "800",
   },
-  attendanceStats: { marginTop: 13, gap: 10 },
+  attendanceKpis: { marginTop: 13, marginBottom: 10, flexDirection: "row", gap: 8 },
+  attendanceKpi: {
+    flex: 1,
+    minHeight: 74,
+    paddingHorizontal: 10,
+    paddingVertical: 11,
+    borderRadius: 15,
+    backgroundColor: palette.card,
+    borderWidth: 1,
+    borderColor: palette.line,
+  },
+  kpiLabel: { color: palette.muted, fontSize: 8, letterSpacing: 0.65, fontWeight: "700" },
+  kpiRate: { marginTop: 7, color: palette.forest, fontSize: 21, lineHeight: 25, fontWeight: "700" },
+  kpiCount: { marginTop: 7, fontSize: 21, lineHeight: 25, fontWeight: "700" },
+  kpiGood: { color: palette.forest },
+  kpiMissed: { color: palette.coral },
   attendanceMainStat: {
     padding: 17,
     borderRadius: 18,
@@ -1841,16 +2169,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: palette.line,
   },
-  statEyebrow: { color: palette.muted, fontSize: 9, letterSpacing: 1.1, fontWeight: "700" },
-  attendanceRate: {
-    marginTop: 6,
-    color: palette.forest,
-    fontSize: 35,
-    lineHeight: 40,
-    letterSpacing: -1,
-    fontWeight: "700",
+  chartHeadingRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 8,
   },
-  statCaption: { marginTop: 2, color: palette.muted, fontSize: 11 },
+  excusedSummary: { color: palette.blue, fontSize: 10, fontWeight: "600" },
   segmentTrack: {
     height: 8,
     flexDirection: "row",
@@ -1862,11 +2187,12 @@ const styles = StyleSheet.create({
   },
   segmentGood: { borderRadius: 5, backgroundColor: palette.forest },
   segmentMissed: { borderRadius: 5, backgroundColor: palette.coral },
-  segmentExcused: { borderRadius: 5, backgroundColor: palette.sunny },
+  segmentExcused: { borderRadius: 5, backgroundColor: palette.blue },
   legendRow: { marginTop: 12, flexDirection: "row", gap: 15 },
   legendItem: { flexDirection: "row", alignItems: "center", gap: 5 },
   legendDotGood: { width: 7, height: 7, borderRadius: 4, backgroundColor: palette.forest },
   legendDotMissed: { width: 7, height: 7, borderRadius: 4, backgroundColor: palette.coral },
+  legendDotExcused: { width: 7, height: 7, borderRadius: 4, backgroundColor: palette.blue },
   legendLabel: { color: palette.text, fontSize: 10 },
   weeklyChart: {
     padding: 16,
@@ -1877,26 +2203,107 @@ const styles = StyleSheet.create({
   },
   chartTitle: { color: palette.ink, fontSize: 13, fontWeight: "700" },
   chartCaption: { marginTop: 3, color: palette.muted, fontSize: 10 },
-  chartBars: {
-    height: 110,
-    marginTop: 11,
-    flexDirection: "row",
-    justifyContent: "space-around",
-    gap: 8,
+  attendanceInsight: {
+    marginTop: 13,
+    padding: 12,
+    borderRadius: 13,
+    backgroundColor: palette.mint,
   },
-  chartColumn: { flex: 1, alignItems: "center", justifyContent: "flex-end" },
-  chartCount: { height: 14, color: palette.text, fontSize: 9, fontWeight: "600" },
-  chartBarBase: {
-    width: "100%",
-    height: 72,
-    justifyContent: "flex-end",
-    overflow: "hidden",
-    borderRadius: 7,
+  attendanceInsightLabel: { color: palette.forest, fontSize: 12, fontWeight: "700" },
+  attendanceInsightText: { marginTop: 4, color: palette.text, fontSize: 10, lineHeight: 15 },
+  chartGraph: { marginTop: 18, flexDirection: "row", alignItems: "stretch", gap: 6 },
+  chartYAxis: { width: 24, height: 148, position: "relative" },
+  chartAxisLabel: {
+    position: "absolute",
+    right: 1,
+    width: 22,
+    color: palette.text,
+    fontSize: 9,
+    textAlign: "right",
+    transform: [{ translateY: -5 }],
+  },
+  chartPlot: { flex: 1, position: "relative", overflow: "visible" },
+  chartHorizontalGrid: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    borderTopWidth: 1,
+    borderTopColor: "#DFE5EE",
+    borderStyle: "dashed",
+  },
+  chartVerticalGrid: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    borderLeftWidth: 1,
+    borderLeftColor: "#E7EBF2",
+    borderStyle: "dashed",
+  },
+  chartTrendLine: {
+    position: "absolute",
+    height: 2,
+    borderRadius: 2,
+    backgroundColor: "#1677F8",
+  },
+  chartPointHit: {
+    position: "absolute",
+    width: 24,
+    height: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  chartPoint: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 2,
+    borderColor: palette.card,
+    backgroundColor: "#1677F8",
+  },
+  chartTooltip: {
+    position: "absolute",
+    zIndex: 3,
+    width: 132,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: palette.line,
+    backgroundColor: palette.card,
+    shadowColor: "#26364A",
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  tooltipDate: { color: palette.ink, fontSize: 10, fontWeight: "600" },
+  tooltipPresent: { marginTop: 5, color: "#1CA34A", fontSize: 10 },
+  tooltipRate: { marginTop: 3, color: "#1677F8", fontSize: 12, fontWeight: "700" },
+  chartXAxis: {
+    marginLeft: 30,
+    marginTop: 4,
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  chartDateLabel: { color: palette.text, fontSize: 8 },
+  chartLegend: {
+    marginTop: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+  },
+  chartLegendDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: "#1677F8" },
+  chartLegendText: { color: "#1677F8", fontSize: 11, fontWeight: "500" },
+  chartEmpty: {
+    minHeight: 96,
+    marginTop: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 12,
     backgroundColor: palette.canvas,
   },
-  chartBar: { width: "100%", minHeight: 5, borderRadius: 7, backgroundColor: palette.mintDeep },
-  chartBarCurrent: { backgroundColor: palette.forest },
-  chartWeekLabel: { marginTop: 6, color: palette.muted, fontSize: 9 },
+  chartEmptyText: { color: palette.muted, fontSize: 10, textAlign: "center" },
   listCard: {
     paddingHorizontal: 13,
     borderRadius: 17,
@@ -2047,8 +2454,48 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     backgroundColor: palette.mint,
   },
+  accountEmail: { marginTop: 3, color: palette.muted, fontSize: 10 },
   accountChildName: { color: palette.ink, fontSize: 15, fontWeight: "700" },
   accountCaption: { marginTop: 4, color: palette.text, fontSize: 10 },
+  childSettingRow: {
+    minHeight: 58,
+    paddingVertical: 9,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: palette.line,
+  },
+  settingsRow: {
+    minHeight: 54,
+    paddingVertical: 9,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: palette.line,
+  },
+  settingsRowTitle: { color: palette.ink, fontSize: 12, fontWeight: "600" },
+  settingsRowDetail: { marginTop: 3, color: palette.muted, fontSize: 10, lineHeight: 14 },
+  settingsChevron: { color: palette.muted, fontSize: 23, lineHeight: 25 },
+  supportNote: { paddingTop: 13 },
+  supportTitle: { color: palette.ink, fontSize: 12, fontWeight: "600" },
+  settingsBack: { alignSelf: "flex-start", paddingVertical: 5, marginBottom: 8 },
+  settingsBackText: { color: palette.forest, fontSize: 12, fontWeight: "600" },
+  studentProfileSummary: { flexDirection: "row", alignItems: "center", gap: 11, marginBottom: 15 },
+  readOnlyField: {
+    marginTop: 10,
+    padding: 12,
+    borderRadius: 11,
+    backgroundColor: palette.canvas,
+  },
+  readOnlyValue: { color: palette.ink, fontSize: 12, fontWeight: "600" },
+  correctionNote: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: palette.sunnySoft,
+  },
   formCard: {
     marginTop: 10,
     padding: 15,

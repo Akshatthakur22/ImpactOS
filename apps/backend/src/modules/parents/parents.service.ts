@@ -64,12 +64,9 @@ export function createParentsService(repository: ParentRepository) {
     async getProfile(academyId: string, userId: string) {
       return (await repository.getProfile(academyId, userId)) ?? { displayName: "", phone: null };
     },
-    async updateProfile(input: { academyId: string; userId: string; displayName: string; phone: string | null }) {
-      if (!(await repository.updateProfile(input))) throw new ParentError(404, "PARENT_NOT_FOUND", "Parent account was not found.");
-      return { updated: true };
-    },
-    async updateLinkedStudent(input: { academyId: string; userId: string; studentId: string; firstName: string; lastName: string }) {
-      if (!(await repository.updateLinkedStudent(input))) throw new ParentError(404, "RELATED_RECORD_NOT_FOUND", "The linked academy record was not found.");
+    async updateProfile(input: { academyId: string; userId: string; displayName: string }) {
+      if (!(await repository.updateProfile(input)))
+        throw new ParentError(404, "PARENT_NOT_FOUND", "Parent account was not found.");
       return { updated: true };
     },
     async revokeGuardianInvite(input: { academyId: string; guardianId: string }) {
@@ -181,6 +178,13 @@ export function createParentsService(repository: ParentRepository) {
     },
 
     async listStudentProgress(academyId: string, userId: string, studentId: string) {
+      if (!(await repository.ownsStudent(academyId, userId, studentId))) {
+        throw new ParentError(
+          404,
+          "RELATED_RECORD_NOT_FOUND",
+          "The linked academy record was not found.",
+        );
+      }
       try {
         return await repository.listStudentProgress(academyId, userId, studentId);
       } catch (error) {

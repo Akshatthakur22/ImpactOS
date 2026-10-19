@@ -1,4 +1,6 @@
-import * as SecureStore from "expo-secure-store";
+import Constants from "expo-constants";
+import { Platform } from "react-native";
+import { saveRefreshToken } from "./refresh-token-storage";
 import {
   ApiErrorSchema,
   ApiSuccessSchema,
@@ -6,14 +8,52 @@ import {
   type AuthData,
 } from "@sportdesk/contracts";
 
-const API_BASE = (process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:4000/api/v1").replace(
-  /\/$/,
-  "",
-);
-const REFRESH_KEY = "sportdesk.refresh-token";
+function hostFromDevServer(value?: string | null) {
+  if (!value) return null;
+  try {
+    return new URL(value.includes("://") ? value : `http://${value}`).hostname;
+  } catch {
+    return null;
+  }
+}
+
+export function resolveMobileApiBase(options: {
+  configuredUrl?: string | undefined;
+  developmentHost?: string | null | undefined;
+  isDevelopment: boolean;
+  platform: string;
+  webHostname?: string | undefined;
+}) {
+  const configured = options.configuredUrl?.trim().replace(/\/+$/, "");
+  if (configured) return configured;
+
+  if (options.isDevelopment) {
+    if (options.platform === "web" && options.webHostname)
+      return `http://${options.webHostname}:4000/api/v1`;
+    const devHost = hostFromDevServer(options.developmentHost);
+    if (devHost) return `http://${devHost}:4000/api/v1`;
+    if (options.platform === "android") return "http://10.0.2.2:4000/api/v1";
+    return "http://localhost:4000/api/v1";
+  }
+
+  return null;
+}
+
+const API_BASE = resolveMobileApiBase({
+  configuredUrl: process.env.EXPO_PUBLIC_API_URL,
+  developmentHost: Constants.expoConfig?.hostUri,
+  isDevelopment: __DEV__,
+  platform: Platform.OS,
+  webHostname: typeof window === "undefined" ? undefined : window.location.hostname,
+});
 let refreshInFlight: Promise<AuthData> | null = null;
 
 export async function mobileFetch(path: string, init: RequestInit = {}) {
+  if (!API_BASE) {
+    throw new Error(
+      "This SportDesk build has no API address. Set EXPO_PUBLIC_API_URL and rebuild the app.",
+    );
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 12_000);
   try {
@@ -47,7 +87,7 @@ async function renewMobileSession(refreshToken: string) {
       });
       if (!refreshed.ok) throw new Error(await errorMessage(refreshed));
       const nextAuth = ApiSuccessSchema(AuthDataSchema).parse(await refreshed.json()).data;
-      if (nextAuth.refreshToken) await SecureStore.setItemAsync(REFRESH_KEY, nextAuth.refreshToken);
+      if (nextAuth.refreshToken) await saveRefreshToken(nextAuth.refreshToken);
       return nextAuth;
     })().finally(() => {
       refreshInFlight = null;

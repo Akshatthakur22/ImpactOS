@@ -1,5 +1,8 @@
 import { Router } from "express";
-import { RedeemGuardianInviteRequestSchema, UpdateParentProfileRequestSchema, UpdateParentStudentRequestSchema } from "@sportdesk/contracts";
+import {
+  RedeemGuardianInviteRequestSchema,
+  UpdateParentProfileRequestSchema,
+} from "@sportdesk/contracts";
 import { z } from "zod";
 import type { SportDeskAuthService } from "../auth/auth.service.js";
 import { AuthError } from "../auth/auth.service.js";
@@ -14,23 +17,23 @@ export function createParentsRouter(options: {
 
   router.get("/parent/me/profile", async (request, response) => {
     const user = await authenticatedUser(request, options.auth);
-    if (user.role !== "parent") throw new AuthError(403, "FORBIDDEN", "Parent access is required for this operation.");
+    if (user.role !== "parent")
+      throw new AuthError(403, "FORBIDDEN", "Parent access is required for this operation.");
     response.status(200).json({ data: await options.parents.getProfile(user.academyId, user.id) });
   });
   router.patch("/parent/me/profile", async (request, response) => {
     const user = await authenticatedUser(request, options.auth);
-    if (user.role !== "parent") throw new AuthError(403, "FORBIDDEN", "Parent access is required for this operation.");
+    if (user.role !== "parent")
+      throw new AuthError(403, "FORBIDDEN", "Parent access is required for this operation.");
     const input = UpdateParentProfileRequestSchema.parse(request.body);
-    response.status(200).json({ data: await options.parents.updateProfile({ ...input, academyId: user.academyId, userId: user.id }) });
+    response.status(200).json({
+      data: await options.parents.updateProfile({
+        ...input,
+        academyId: user.academyId,
+        userId: user.id,
+      }),
+    });
   });
-  router.patch("/parent/students/:studentId/profile", async (request, response) => {
-    const user = await authenticatedUser(request, options.auth);
-    if (user.role !== "parent") throw new AuthError(403, "FORBIDDEN", "Parent access is required for this operation.");
-    const studentId = z.string().uuid().parse(request.params.studentId);
-    const input = UpdateParentStudentRequestSchema.parse(request.body);
-    response.status(200).json({ data: await options.parents.updateLinkedStudent({ ...input, studentId, academyId: user.academyId, userId: user.id }) });
-  });
-
   router.post("/parent-invites/redeem", async (request, response) => {
     const input = RedeemGuardianInviteRequestSchema.parse(request.body);
     const result = await options.parents.redeemGuardianInvite(input);
@@ -88,13 +91,11 @@ export function createParentsRouter(options: {
       throw new AuthError(403, "FORBIDDEN", "Parent access is required for this operation.");
     const studentId = z.string().uuid().parse(request.params.studentId);
     const entries = await options.parents.listStudentProgress(user.academyId, user.id, studentId);
-    response
-      .status(200)
-      .json({
-        data: {
-          entries: entries.map((row) => ({ ...row, createdAt: row.createdAt.toISOString() })),
-        },
-      });
+    response.status(200).json({
+      data: {
+        entries: entries.map((row) => ({ ...row, createdAt: row.createdAt.toISOString() })),
+      },
+    });
   });
 
   return router;

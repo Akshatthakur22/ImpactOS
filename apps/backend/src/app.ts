@@ -65,7 +65,27 @@ export function createApp(options: AppOptions): Express {
   app.use(helmet());
   app.use(
     cors({
-      origin: options.webOrigin,
+      origin(origin, callback) {
+        if (!origin || origin === options.webOrigin) {
+          callback(null, true);
+          return;
+        }
+        if (!options.secureCookies) {
+          try {
+            const parsedOrigin = new URL(origin);
+            const isLocalDevelopmentOrigin =
+              (parsedOrigin.protocol === "http:" || parsedOrigin.protocol === "https:") &&
+              ["localhost", "127.0.0.1", "[::1]"].includes(parsedOrigin.hostname);
+            if (isLocalDevelopmentOrigin) {
+              callback(null, true);
+              return;
+            }
+          } catch {
+            // Invalid origins are denied below.
+          }
+        }
+        callback(null, false);
+      },
       credentials: true,
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       allowedHeaders: ["Content-Type", "Authorization"],
@@ -89,7 +109,7 @@ export function createApp(options: AppOptions): Express {
 
   const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    limit: 10,
+    limit: options.secureCookies ? 10 : 100,
     standardHeaders: "draft-8",
     legacyHeaders: false,
     message: {
@@ -153,7 +173,11 @@ export function createApp(options: AppOptions): Express {
   if (options.announcements) {
     app.use(
       "/api/v1",
-      createAnnouncementsRouter({ auth: options.auth, announcements: options.announcements, ...(options.push ? { push: options.push } : {}) }),
+      createAnnouncementsRouter({
+        auth: options.auth,
+        announcements: options.announcements,
+        ...(options.push ? { push: options.push } : {}),
+      }),
     );
   }
   if (options.admissions) {
@@ -169,7 +193,14 @@ export function createApp(options: AppOptions): Express {
     app.use("/api/v1", createPushRouter({ auth: options.auth, push: options.push }));
   }
   if (options.progress) {
-    app.use("/api/v1", createProgressRouter({ auth: options.auth, progress: options.progress, ...(options.push ? { push: options.push } : {}) }));
+    app.use(
+      "/api/v1",
+      createProgressRouter({
+        auth: options.auth,
+        progress: options.progress,
+        ...(options.push ? { push: options.push } : {}),
+      }),
+    );
   }
 
   app.use((_request, response) => {
@@ -257,16 +288,20 @@ export function createApp(options: AppOptions): Express {
     // Preserve the response's generic error while recording safe diagnostic metadata.
     const errorName = error instanceof Error ? error.name : "UnknownError";
     const errorCode =
-      typeof error === "object" && error !== null && "code" in error &&
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
       typeof error.code === "string"
         ? error.code
         : undefined;
-    console.error(JSON.stringify({
-      event: "request_failed",
-      requestId,
-      errorName,
-      ...(errorCode ? { errorCode } : {}),
-    }));
+    console.error(
+      JSON.stringify({
+        event: "request_failed",
+        requestId,
+        errorName,
+        ...(errorCode ? { errorCode } : {}),
+      }),
+    );
     response.status(500).json({
       error: { code: "INTERNAL_ERROR", message: "An unexpected error occurred.", requestId },
     });

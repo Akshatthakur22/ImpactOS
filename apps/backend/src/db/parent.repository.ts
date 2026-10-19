@@ -35,27 +35,37 @@ export class ParentRepositoryError extends Error {
 export function createParentRepository(db: Database) {
   return {
     async getProfile(academyId: string, userId: string) {
-      const [row] = await db.select({ displayName: users.displayName, phone: guardians.phone })
-        .from(users).leftJoin(guardians, and(eq(guardians.userId, users.id), eq(guardians.academyId, users.academyId)))
-        .where(and(eq(users.id, userId), eq(users.academyId, academyId), eq(users.role, "parent"))).limit(1);
+      const [row] = await db
+        .select({ displayName: users.displayName, phone: guardians.phone })
+        .from(users)
+        .leftJoin(
+          guardians,
+          and(eq(guardians.userId, users.id), eq(guardians.academyId, users.academyId)),
+        )
+        .where(and(eq(users.id, userId), eq(users.academyId, academyId), eq(users.role, "parent")))
+        .limit(1);
       return row ?? null;
     },
-    async updateProfile(input: { academyId: string; userId: string; displayName: string; phone: string | null }) {
+    async updateProfile(input: { academyId: string; userId: string; displayName: string }) {
       return db.transaction(async (tx) => {
-        const [user] = await tx.update(users).set({ displayName: input.displayName, updatedAt: new Date() })
-          .where(and(eq(users.id, input.userId), eq(users.academyId, input.academyId), eq(users.role, "parent"))).returning({ id: users.id });
+        const [user] = await tx
+          .update(users)
+          .set({ displayName: input.displayName, updatedAt: new Date() })
+          .where(
+            and(
+              eq(users.id, input.userId),
+              eq(users.academyId, input.academyId),
+              eq(users.role, "parent"),
+            ),
+          )
+          .returning({ id: users.id });
         if (!user) return false;
-        await tx.update(guardians).set({ name: input.displayName, phone: input.phone, updatedAt: new Date() })
+        await tx
+          .update(guardians)
+          .set({ name: input.displayName, updatedAt: new Date() })
           .where(and(eq(guardians.userId, input.userId), eq(guardians.academyId, input.academyId)));
         return true;
       });
-    },
-    async updateLinkedStudent(input: { academyId: string; userId: string; studentId: string; firstName: string; lastName: string }) {
-      const [row] = await db.update(students).set({ firstName: input.firstName, lastName: input.lastName, updatedAt: new Date() })
-        .where(and(eq(students.id, input.studentId), eq(students.academyId, input.academyId),
-          sql`exists (select 1 from student_guardians sg join guardians g on g.id = sg.guardian_id where sg.student_id = ${students.id} and sg.academy_id = ${input.academyId} and g.user_id = ${input.userId})`))
-        .returning({ id: students.id });
-      return Boolean(row);
     },
     async revokeInvite(input: { academyId: string; guardianId: string; now: Date }) {
       const [guardian] = await db

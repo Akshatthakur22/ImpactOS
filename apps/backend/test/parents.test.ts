@@ -7,6 +7,12 @@ import type { PublicUser } from "@sportdesk/contracts";
 import type { Database } from "../src/db/client.js";
 import { createParentRepository } from "../src/db/parent.repository.js";
 import { createParentsService } from "../src/modules/parents/parents.service.js";
+import { createFinanceRepository } from "../src/db/finance.repository.js";
+import { createFinanceService } from "../src/modules/finance/finance.service.js";
+import { createAnnouncementsRepository } from "../src/db/announcements.repository.js";
+import { createAnnouncementsService } from "../src/modules/announcements/announcements.service.js";
+import { createProgressRepository } from "../src/db/progress.repository.js";
+import { createProgressService } from "../src/modules/progress/progress.service.js";
 import { createApp } from "../src/app.js";
 import type { SportDeskAuthService } from "../src/modules/auth/auth.service.js";
 
@@ -23,6 +29,10 @@ const unlinkedGuardianId = "0321f5c1-e5e8-4c17-9df1-271cad62b265";
 const scheduleId = "0421f5c1-e5e8-4c17-9df1-271cad62b265";
 const sessionId = "0521f5c1-e5e8-4c17-9df1-271cad62b265";
 const attendanceId = "0621f5c1-e5e8-4c17-9df1-271cad62b265";
+const announcementId = "0821f5c1-e5e8-4c17-9df1-271cad62b265";
+const feeChargeId = "0921f5c1-e5e8-4c17-9df1-271cad62b265";
+const visibleProgressId = "0a21f5c1-e5e8-4c17-9df1-271cad62b265";
+const hiddenProgressId = "0b21f5c1-e5e8-4c17-9df1-271cad62b265";
 
 const owner: PublicUser = {
   id: ownerId,
@@ -39,6 +49,9 @@ describe("parent access", () => {
   const app = (() => {
     const database = drizzlePGlite(client) as unknown as Database;
     const parents = createParentsService(createParentRepository(database));
+    const finance = createFinanceService(createFinanceRepository(database));
+    const announcements = createAnnouncementsService(createAnnouncementsRepository(database));
+    const progress = createProgressService(createProgressRepository(database));
     const auth = {
       async authenticate(token: string) {
         if (token === "owner-token") return owner;
@@ -49,6 +62,9 @@ describe("parent access", () => {
     return createApp({
       auth,
       parents,
+      finance,
+      announcements,
+      progress,
       webOrigin: "http://localhost:3000",
       secureCookies: false,
       sessionTtlDays: 30,
@@ -134,6 +150,18 @@ describe("parent access", () => {
       "INSERT INTO attendance_records (id, academy_id, session_id, student_id, status, recorded_by) VALUES ($1, $2, $3, $4, 'present', $5)",
       [attendanceId, academyId, sessionId, firstStudentId, ownerId],
     );
+    await client.query(
+      "INSERT INTO fee_charges (id, academy_id, student_id, invoice_number, description, due_date, amount_paise, currency, created_by) VALUES ($1, $2, $3, 'INV-TEST-01', 'Monthly training fee', '2026-11-01', 250000, 'INR', $4)",
+      [feeChargeId, academyId, firstStudentId, ownerId],
+    );
+    await client.query(
+      "INSERT INTO academy_announcements (id, academy_id, title, body, audience, status, created_by, published_at) VALUES ($1, $2, 'Welcome back', 'Training resumes Monday.', 'parents', 'published', $3, now())",
+      [announcementId, academyId, ownerId],
+    );
+    await client.query(
+      "INSERT INTO progress_entries (id, academy_id, student_id, session_id, coach_id, assessment_name, value, coach_note, parent_visible) VALUES ($1, $2, $3, $4, $5, 'Balance', 'Improving', 'Great focus today.', true), ($6, $2, $3, $4, $5, 'Internal review', null, 'Coach-only note.', false)",
+      [visibleProgressId, academyId, firstStudentId, sessionId, ownerId, hiddenProgressId],
+    );
   });
 
   afterAll(async () => {
@@ -200,6 +228,38 @@ describe("parent access", () => {
     expect(history.body.data.records).toHaveLength(1);
     expect(history.body.data.records[0].status).toBe("present");
 
+    const finance = await request(app)
+      .get(`/api/v1/parent/students/${firstStudentId}/finance`)
+      .set("Authorization", "Bearer parent-token");
+    expect(finance.status).toBe(200);
+    expect(finance.body.data.currency).toBe("INR");
+    expect(finance.body.data.charges).toHaveLength(1);
+    expect(finance.body.data.charges[0].balancePaise).toBe(250000);
+
+    const progress = await request(app)
+      .get(`/api/v1/parent/students/${firstStudentId}/progress`)
+      .set("Authorization", "Bearer parent-token");
+    expect(progress.status).toBe(200);
+    expect(progress.body.data.entries).toHaveLength(1);
+    expect(progress.body.data.entries[0].id).toBe(visibleProgressId);
+    expect(progress.body.data.entries[0].coachNote).toBe("Great focus today.");
+
+    const notices = await request(app)
+      .get("/api/v1/parent/announcements")
+      .set("Authorization", "Bearer parent-token");
+    expect(notices.status).toBe(200);
+    expect(notices.body.data.announcements).toHaveLength(1);
+    expect(notices.body.data.announcements[0].id).toBe(announcementId);
+    expect(notices.body.data.announcements[0].readAt).toBeNull();
+    const markNoticeRead = await request(app)
+      .post(`/api/v1/parent/announcements/${announcementId}/read`)
+      .set("Authorization", "Bearer parent-token");
+    expect(markNoticeRead.status).toBe(200);
+    const readNotices = await request(app)
+      .get("/api/v1/parent/announcements")
+      .set("Authorization", "Bearer parent-token");
+    expect(readNotices.body.data.announcements[0].readAt).toEqual(expect.any(String));
+
     const profile = await request(app)
       .get("/api/v1/parent/me/profile")
       .set("Authorization", "Bearer parent-token");
@@ -209,22 +269,31 @@ describe("parent access", () => {
     const profileUpdate = await request(app)
       .patch("/api/v1/parent/me/profile")
       .set("Authorization", "Bearer parent-token")
-      .send({ displayName: "Aarav Mehta", phone: "+919876543210" });
+      .send({ displayName: "Aarav Mehta" });
     expect(profileUpdate.status).toBe(200);
     const studentUpdate = await request(app)
       .patch(`/api/v1/parent/students/${firstStudentId}/profile`)
       .set("Authorization", "Bearer parent-token")
       .send({ firstName: "Aarav", lastName: "Sharma" });
-    expect(studentUpdate.status).toBe(200);
+    expect(studentUpdate.status).toBe(404);
     const changedStudent = await client.query<{ last_name: string }>(
-      "SELECT last_name FROM students WHERE id = $1", [firstStudentId],
+      "SELECT last_name FROM students WHERE id = $1",
+      [firstStudentId],
     );
-    expect(changedStudent.rows[0]?.last_name).toBe("Sharma");
+    expect(changedStudent.rows[0]?.last_name).toBe("Student");
 
     const forbiddenChild = await request(app)
       .get(`/api/v1/parent/students/${unlinkedStudentId}/attendance`)
       .set("Authorization", "Bearer parent-token");
     expect(forbiddenChild.status).toBe(404);
+    const forbiddenFinance = await request(app)
+      .get(`/api/v1/parent/students/${unlinkedStudentId}/finance`)
+      .set("Authorization", "Bearer parent-token");
+    expect(forbiddenFinance.status).toBe(404);
+    const forbiddenProgress = await request(app)
+      .get(`/api/v1/parent/students/${unlinkedStudentId}/progress`)
+      .set("Authorization", "Bearer parent-token");
+    expect(forbiddenProgress.status).toBe(404);
     const forbiddenEdit = await request(app)
       .patch(`/api/v1/parent/students/${unlinkedStudentId}/profile`)
       .set("Authorization", "Bearer parent-token")

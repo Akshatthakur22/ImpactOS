@@ -469,17 +469,15 @@ export type ParentStudent = z.infer<typeof ParentStudentSchema>;
 
 export const UpdateParentProfileRequestSchema = z.object({
   displayName: z.string().trim().min(1).max(160),
-  phone: z.string().trim().min(7).max(30).nullable(),
-});
-export const UpdateParentStudentRequestSchema = z.object({
-  firstName: z.string().trim().min(1).max(80),
-  lastName: z.string().trim().min(1).max(80),
 });
 export const ChangePasswordRequestSchema = z.object({
   currentPassword: z.string().min(1).max(256),
   newPassword: z.string().min(14).max(256),
 });
-export const ParentProfileSchema = z.object({ displayName: z.string(), phone: z.string().nullable() });
+export const ParentProfileSchema = z.object({
+  displayName: z.string(),
+  phone: z.string().nullable(),
+});
 
 export const ParentScheduleSchema = z.object({
   id: z.string().uuid(),

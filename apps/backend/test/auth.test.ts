@@ -71,6 +71,9 @@ function makeHarness(role: UserWithAcademy["role"] = "owner") {
         if (session.tokenHash === tokenHash && !session.revokedAt) session.revokedAt = now;
       }
     },
+    async changePassword(userId, passwordHash) {
+      if (userId === user.id) user.passwordHash = passwordHash;
+    },
   };
 
   const auth = createAuthService({
@@ -78,6 +81,9 @@ function makeHarness(role: UserWithAcademy["role"] = "owner") {
     passwordVerifier: {
       async verify(encodedHash, password) {
         return encodedHash === `hash:${password}`;
+      },
+      async hash(password) {
+        return `hash:${password}`;
       },
     },
     dummyPasswordHash: "dummy-hash",
@@ -91,6 +97,33 @@ function makeHarness(role: UserWithAcademy["role"] = "owner") {
 }
 
 describe("authentication API", () => {
+  it("allows localhost Expo web previews to call the API during development", async () => {
+    const { app } = makeHarness();
+    const preflight = await request(app)
+      .options("/api/v1/auth/login")
+      .set("Origin", "http://localhost:8082")
+      .set("Access-Control-Request-Method", "POST")
+      .set("Access-Control-Request-Headers", "content-type");
+
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers["access-control-allow-origin"]).toBe("http://localhost:8082");
+  });
+
+  it("allows more than ten sign-in retries in a local development app", async () => {
+    const { app } = makeHarness();
+    const responses = await Promise.all(
+      Array.from({ length: 11 }, () =>
+        request(app).post("/api/v1/auth/login").send({
+          email: "missing@impactfit.example",
+          password: "incorrect-password",
+          clientType: "mobile",
+        }),
+      ),
+    );
+
+    expect(responses.every((response) => response.status === 401)).toBe(true);
+  });
+
   it("signs in a web owner, uses an HttpOnly refresh cookie, and serves the current user", async () => {
     const { app } = makeHarness();
     const login = await request(app).post("/api/v1/auth/login").set("Origin", webOrigin).send({
@@ -180,5 +213,32 @@ describe("authentication API", () => {
       .get("/api/v1/admin/overview")
       .set("Authorization", `Bearer ${login.body.data.accessToken}`);
     expect(response.status).toBe(403);
+  });
+
+  it("lets a parent change their password and sign in with the new one", async () => {
+    const { app } = makeHarness("parent");
+    const login = await request(app).post("/api/v1/auth/login").send({
+      email: "owner@impactfit.example",
+      password: "correct-password",
+      clientType: "mobile",
+    });
+    expect(login.status).toBe(200);
+
+    const changed = await request(app)
+      .post("/api/v1/auth/password/change")
+      .set("Authorization", `Bearer ${login.body.data.accessToken}`)
+      .send({
+        currentPassword: "correct-password",
+        newPassword: "new-secure-parent-password-2026",
+      });
+    expect(changed.status).toBe(200);
+    expect(changed.body.data.updated).toBe(true);
+
+    const signedIn = await request(app).post("/api/v1/auth/login").send({
+      email: "owner@impactfit.example",
+      password: "new-secure-parent-password-2026",
+      clientType: "mobile",
+    });
+    expect(signedIn.status).toBe(200);
   });
 });
