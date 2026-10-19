@@ -21,6 +21,7 @@ export class AuthError extends Error {
 
 type PasswordVerifier = {
   verify(encodedHash: string, password: string): Promise<boolean>;
+  hash?(password: string): Promise<string>;
 };
 
 type AuthServiceOptions = {
@@ -164,6 +165,16 @@ export function createAuthService(options: AuthServiceOptions) {
     async logout(refreshToken: string | undefined): Promise<void> {
       if (!refreshToken || refreshToken.length < 32 || refreshToken.length > 256) return;
       await options.repository.revokeSession(hashToken(refreshToken), now());
+    },
+
+    async changePassword(userId: string, currentPassword: string, newPassword: string) {
+      if (!options.passwordVerifier.hash || !options.repository.changePassword)
+        throw new AuthError(503, "PASSWORD_CHANGE_UNAVAILABLE", "Password changes are not configured.");
+      const user = await options.repository.findUserById(userId);
+      if (!user?.isActive || !(await options.passwordVerifier.verify(user.passwordHash, currentPassword)))
+        throw new AuthError(400, "INVALID_CURRENT_PASSWORD", "Current password is incorrect.");
+      await options.repository.changePassword(userId, await options.passwordVerifier.hash(newPassword), now());
+      return { updated: true };
     },
 
     async authenticate(accessToken: string): Promise<PublicUser | null> {

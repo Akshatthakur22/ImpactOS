@@ -39,15 +39,33 @@ export function createPushService(repository: PushRepository) {
       return repository.deactivate(input);
     },
     async attendanceRecorded(academyId: string, sessionId: string) {
-      const devices = await repository.listAttendanceRecipients(academyId);
+      const devices = await repository.listSessionRecipients(academyId, sessionId);
       await send(
-        devices.map(({ token }) => ({
+        [...new Map(devices.map(({ token }) => [token, token])).values()].map((token) => ({
           to: token,
           title: "Attendance recorded",
-          body: "A coach completed attendance for a training session.",
+          body: "Attendance was updated for a training session.",
           data: { sessionId },
         })),
       );
+    },
+    async announcementPublished(academyId: string, announcementId: string) {
+      const devices = await repository.listAnnouncementRecipients(academyId, announcementId);
+      await send([...new Map(devices.map((item) => [item.token, item])).values()].map(({ token, title, body }) => ({
+        to: token,
+        title: `Academy notice: ${title}`,
+        body: body.slice(0, 160),
+        data: { announcementId },
+      })));
+    },
+    async progressShared(academyId: string, studentId: string) {
+      const devices = await repository.listStudentParentRecipients(academyId, studentId);
+      await send([...new Set(devices.map(({ token }) => token))].map((token) => ({
+        to: token,
+        title: "New progress shared",
+        body: "A coach shared a new assessment or note for your child.",
+        data: { studentId },
+      })));
     },
   };
 }

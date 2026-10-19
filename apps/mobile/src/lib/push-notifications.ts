@@ -27,7 +27,7 @@ export async function registerPushDevice(
 ) {
   if (Platform.OS !== "ios" && Platform.OS !== "android") return;
   if (runningInExpoGo()) return;
-  if (auth.user.role !== "owner" && auth.user.role !== "staff") return;
+  if (!["owner", "staff", "parent", "coach"].includes(auth.user.role)) return;
   const Notifications = await loadNotifications();
   if (Platform.OS === "android") {
     await Notifications.setNotificationChannelAsync("default", {
@@ -56,7 +56,7 @@ export async function unregisterPushDevice(
 ) {
   if (Platform.OS !== "ios" && Platform.OS !== "android") return;
   if (runningInExpoGo()) return;
-  if (auth.user.role !== "owner" && auth.user.role !== "staff") return;
+  if (!["owner", "staff", "parent", "coach"].includes(auth.user.role)) return;
   try {
     const Notifications = await loadNotifications();
     const projectId = process.env.EXPO_PUBLIC_EAS_PROJECT_ID;

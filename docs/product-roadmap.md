@@ -34,18 +34,18 @@ The detailed admin inventory, reference mapping, build order, finance decisions,
 | Academy setup  | Disciplines, programs, batches, students, guardian contacts, and enrollments. Student plus guardian plus initial enrollment creation is transactional.                                                                                                                                                 |
 | Admissions     | Owner inquiry queue with lead source and program interest, searchable status/follow-up filters, activity history, due dates, and transactional student/guardian/optional-enrollment conversion.                                                                                                        |
 | Admin web      | Login, live academy dashboard, student/guardian lifecycle, catalog editing/capacity management, coach profile lifecycle, schedule/session creation, attendance review/correction, manual fees/expenses, attendance consistency, CSV reports, parent announcements, and academy name/timezone settings. |
-| Coach mobile   | Mobile Today, Attendance, Classes, assigned Students, Profile, and notices navigation; assigned sessions; roster attendance; sport-labeled progress entries with parent visibility controls. Coach profile editing and payouts are not implemented.          |
-| Parent access  | One-use invite redemption, linked-child list, read-only schedule, attendance, finance records, and in-app academy/batch announcements with read tracking.                                                                                                                                              |
+| Coach mobile   | Mobile Today, Attendance, Classes, assigned Students, Profile, and notices navigation; assigned sessions; class check-in/out; roster attendance; sport-labeled progress entries with parent visibility controls. Coach profile editing and payouts are not implemented.                                |
+| Parent access  | One-use invite redemption; linked-child viewing and name edits; basic parent name/phone profile editing; password change; read-only schedule, attendance, coach-shared progress, and finance records; in-app announcements and push alerts for announcements, attendance, and shared progress. |
 | Backend safety | Shared Zod contracts, academy-scoped queries and foreign keys, Argon2id passwords, hashed refresh/invite tokens, and audited attendance corrections.                                                                                                                                                   |
 | Database       | Forward-only migrations include the finance ledger, expense register, announcements/read tracking, and admissions inquiry/activity tables. Migration `0010_married_skin.sql` adds the admissions records.                                                                                              |
 
 ### Verification snapshot
 
-- Workspace TypeScript checks pass for shared contracts, backend, admin, and mobile (2026-10-18).
+- Workspace TypeScript checks pass for shared contracts, backend, admin, and mobile (2026-10-19).
 - Repository ESLint passes (2026-10-18).
-- Backend integration suite passes: 8 files, 17 tests, including admissions intake, follow-up history, conversion, capacity rollback, academy, operations, parent-access, and migrations (2026-10-18).
+- Backend integration suite passes: 9 files, 21 tests, including admissions intake, follow-up history, conversion, capacity rollback, academy, operations, parent access, staff/password recovery, and migrations (2026-10-19).
 - Finance has no dedicated automated integration tests yet; finance-ledger and parent-finance isolation acceptance remains outstanding.
-- The one Playwright test covers an owner creating a student and parent invite through mocked API responses. It does not exercise a real backend or the coach/parent mobile journeys.
+- The Playwright test remains a mocked admin journey. Backend PGlite integration tests cover parent invite, linked-child access, profile editing, student-name editing, and child-scope enforcement; native/mobile coach and parent journeys still need device acceptance or a mobile E2E harness.
 - Playwright and production build were not run in this verification pass. The prior audit recorded a shared `.next/dev` lock and a Next dev-origin restriction during E2E; rerun with a clean test environment and expand coverage before the pilot.
 - The API/local database and physical-device LAN address were not re-smoke-checked in this pass. Confirm the configured mobile API address and complete the coach and parent workflows on academy devices.
 
@@ -74,7 +74,7 @@ Owner creates a coach and assigns a batch
 
 - Batch coach assignments still cannot be unassigned.
 - Parent invite codes are shown once for manual delivery; the app does not send email or SMS.
-- Attendance now has a secure local retry queue, session-first review, filters, summaries, and CSV export. Push attendance alerts are wired for owner/staff devices; EAS project and Apple/Google credentials are required for delivery.
+- Attendance now has a secure local retry queue, session-first review, filters, summaries, and CSV export. Attendance push alerts reach linked parent devices and owner/staff devices; announcement and parent-visible progress alerts reach eligible parent devices. EAS project and Apple/Google credentials are required for delivery.
 - Staff permissions are API-enforced and owner-managed; email recovery requires Resend configuration. Additional staff lifecycle audit coverage remains.
 - The current E2E check is a mocked admin journey, not a real-backend or native-app test.
 
@@ -96,7 +96,7 @@ Do not add these deferred features just to declare Phase 1 complete. The closeou
 
 ### Phase 4 — Announcements and reminders
 
-Parent in-app academy/batch announcements are available as an initial slice. Attendance or fee reminders and email/SMS/push still require consent and delivery preferences, then a delivery queue, retries, delivery logs, and one configured channel at a time.
+Parent in-app academy/batch announcements and push alerts for announcements, recorded attendance, and coach-shared progress are implemented. Parent profile/student-name updates and password change are also available; schedules, attendance records, coach notes, and finance remain read-only. Fee payment and fee reminders are deferred with the broader finance decision. Invite delivery remains manual. Native/mobile E2E coverage, consent and notification preferences, delivery retries/logs, and external email/SMS delivery remain future work.
 
 ### Phase 5 — Reports and administration
 

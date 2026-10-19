@@ -200,10 +200,36 @@ describe("parent access", () => {
     expect(history.body.data.records).toHaveLength(1);
     expect(history.body.data.records[0].status).toBe("present");
 
+    const profile = await request(app)
+      .get("/api/v1/parent/me/profile")
+      .set("Authorization", "Bearer parent-token");
+    expect(profile.status).toBe(200);
+    expect(profile.body.data).toEqual({ displayName: "Aarav Parent", phone: null });
+
+    const profileUpdate = await request(app)
+      .patch("/api/v1/parent/me/profile")
+      .set("Authorization", "Bearer parent-token")
+      .send({ displayName: "Aarav Mehta", phone: "+919876543210" });
+    expect(profileUpdate.status).toBe(200);
+    const studentUpdate = await request(app)
+      .patch(`/api/v1/parent/students/${firstStudentId}/profile`)
+      .set("Authorization", "Bearer parent-token")
+      .send({ firstName: "Aarav", lastName: "Sharma" });
+    expect(studentUpdate.status).toBe(200);
+    const changedStudent = await client.query<{ last_name: string }>(
+      "SELECT last_name FROM students WHERE id = $1", [firstStudentId],
+    );
+    expect(changedStudent.rows[0]?.last_name).toBe("Sharma");
+
     const forbiddenChild = await request(app)
       .get(`/api/v1/parent/students/${unlinkedStudentId}/attendance`)
       .set("Authorization", "Bearer parent-token");
     expect(forbiddenChild.status).toBe(404);
+    const forbiddenEdit = await request(app)
+      .patch(`/api/v1/parent/students/${unlinkedStudentId}/profile`)
+      .set("Authorization", "Bearer parent-token")
+      .send({ firstName: "Unrelated", lastName: "Child" });
+    expect(forbiddenEdit.status).toBe(404);
 
     const replay = await request(app)
       .post("/api/v1/parent-invites/redeem")

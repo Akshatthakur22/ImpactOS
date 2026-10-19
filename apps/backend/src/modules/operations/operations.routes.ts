@@ -342,6 +342,26 @@ export function createOperationsRouter(options: {
     response.status(200).json({ data: roster });
   });
 
+  router.post("/coach/sessions/:sessionId/check-in", async (request, response) => {
+    const user = await coachFromRequest(request, options.auth);
+    const presence = await options.operations.checkInCoach(
+      user.academyId,
+      request.params.sessionId,
+      user.id,
+    );
+    response.status(200).json({ data: presence });
+  });
+
+  router.post("/coach/sessions/:sessionId/check-out", async (request, response) => {
+    const user = await coachFromRequest(request, options.auth);
+    const presence = await options.operations.checkOutCoach(
+      user.academyId,
+      request.params.sessionId,
+      user.id,
+    );
+    response.status(200).json({ data: presence });
+  });
+
   router.put("/coach/sessions/:sessionId/attendance", async (request, response) => {
     const user = await coachFromRequest(request, options.auth);
     const input = RecordAttendanceRequestSchema.parse(request.body);

@@ -9,7 +9,7 @@
 - Coach operations require a coach role and an active coach-to-batch assignment. Parent schedule and attendance reads require a linked guardian-to-student relationship; unlinked student requests return no record.
 - Owners alone can correct attendance. The backend requires a reason and writes a correction row in the same transaction as the updated attendance status. Coaches cannot edit records once their session is complete.
 - Parent invite tokens are random, stored as SHA-256 hashes, expire after seven days, and can be redeemed once. Parent accounts set their own password. The invite code is returned once to the owner; delivery is currently handled by the academy outside the app.
-- Staff remain denied. The `user_permissions` table does not yet grant staff access until explicit permission checks and owner management are implemented.
+- Staff permissions are stored per academy, returned with the authenticated user, and managed by owners. Route handlers that use `requirePermission` enforce the grants server-side; keep new staff-accessible routes on that path and leave sensitive operations owner-only where appropriate.
 - The current student form collects names and optional guardian name/contact only. It does not collect date of birth or medical details.
 - Do not rely on frontend navigation or hidden buttons for authorization.
 - Do not return internal exception details to clients or log request bodies, passwords, or tokens.

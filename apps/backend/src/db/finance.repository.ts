@@ -243,6 +243,8 @@ export function createFinanceRepository(db: Database) {
         ...row,
         dueDate: row.dueDate,
         createdAt: row.createdAt.toISOString(),
+        paidPaise: Number(row.paidPaise),
+        refundedPaise: Number(row.refundedPaise),
         balancePaise: Number(row.balancePaise),
         payments: (paymentsByCharge.get(row.id) ?? []).map((payment) => ({
           id: payment.id,

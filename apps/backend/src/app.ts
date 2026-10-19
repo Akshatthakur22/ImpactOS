@@ -153,7 +153,7 @@ export function createApp(options: AppOptions): Express {
   if (options.announcements) {
     app.use(
       "/api/v1",
-      createAnnouncementsRouter({ auth: options.auth, announcements: options.announcements }),
+      createAnnouncementsRouter({ auth: options.auth, announcements: options.announcements, ...(options.push ? { push: options.push } : {}) }),
     );
   }
   if (options.admissions) {
@@ -169,7 +169,7 @@ export function createApp(options: AppOptions): Express {
     app.use("/api/v1", createPushRouter({ auth: options.auth, push: options.push }));
   }
   if (options.progress) {
-    app.use("/api/v1", createProgressRouter({ auth: options.auth, progress: options.progress }));
+    app.use("/api/v1", createProgressRouter({ auth: options.auth, progress: options.progress, ...(options.push ? { push: options.push } : {}) }));
   }
 
   app.use((_request, response) => {

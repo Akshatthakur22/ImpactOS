@@ -388,6 +388,18 @@ export default function AttendancePage() {
                     <p className="mt-1 text-xs text-muted">
                       {session.markedCount} of {session.expectedCount} students marked
                     </p>
+                    {session.coachPresence.length ? (
+                      <p className="mt-1 text-xs text-muted">
+                        {session.coachPresence
+                          .map(
+                            (presence) =>
+                              `${presence.coachName}: in ${presence.checkedInAt ? new Intl.DateTimeFormat("en-IN", { timeStyle: "short", timeZone: timezone }).format(new Date(presence.checkedInAt)) : "—"} · out ${presence.checkedOutAt ? new Intl.DateTimeFormat("en-IN", { timeStyle: "short", timeZone: timezone }).format(new Date(presence.checkedOutAt)) : "—"}`,
+                          )
+                          .join("  |  ")}
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-xs text-muted">Coach check-in/out not recorded</p>
+                    )}
                   </div>
                   <Button
                     size="sm"

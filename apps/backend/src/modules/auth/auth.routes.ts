@@ -1,5 +1,5 @@
 import { Router, type Response } from "express";
-import { LoginRequestSchema, RefreshRequestSchema } from "@sportdesk/contracts";
+import { ChangePasswordRequestSchema, LoginRequestSchema, RefreshRequestSchema } from "@sportdesk/contracts";
 import type { SportDeskAuthService } from "./auth.service.js";
 import { AuthError } from "./auth.service.js";
 
@@ -92,6 +92,16 @@ export function createAuthRouter(options: AuthRouterOptions): Router {
     const user = await options.auth.authenticate(token);
     if (!user) throw new AuthError(401, "UNAUTHENTICATED", "Authentication is required.");
     response.status(200).json({ data: user });
+  });
+
+  router.post("/password/change", async (request, response) => {
+    const authorization = request.get("authorization");
+    const token = authorization?.match(/^Bearer ([A-Za-z0-9._~-]+)$/)?.[1];
+    if (!token) throw new AuthError(401, "UNAUTHENTICATED", "Authentication is required.");
+    const user = await options.auth.authenticate(token);
+    if (!user) throw new AuthError(401, "UNAUTHENTICATED", "Authentication is required.");
+    const input = ChangePasswordRequestSchema.parse(request.body);
+    response.status(200).json({ data: await options.auth.changePassword(user.id, input.currentPassword, input.newPassword) });
   });
 
   return router;

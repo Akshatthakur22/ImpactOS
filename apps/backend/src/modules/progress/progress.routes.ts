@@ -5,10 +5,12 @@ import type { SportDeskAuthService } from "../auth/auth.service.js";
 import { AuthError } from "../auth/auth.service.js";
 import { authenticatedUser, requirePermission } from "../auth/authorization.js";
 import type { SportDeskProgressService } from "./progress.service.js";
+import type { SportDeskPushService } from "../push/push.service.js";
 
 export function createProgressRouter(options: {
   auth: SportDeskAuthService;
   progress: SportDeskProgressService;
+  push?: SportDeskPushService;
 }) {
   const router = Router();
   router.get("/progress", async (request, response) => {
@@ -48,6 +50,7 @@ export function createProgressRouter(options: {
       coachId: user.id,
       sessionId: z.string().uuid().parse(request.params.sessionId),
     });
+    if (input.parentVisible && options.push) void options.push.progressShared(user.academyId, input.studentId).catch(() => console.warn("Progress push preparation failed."));
     response.status(201).json({ data: entry });
   });
   return router;

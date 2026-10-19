@@ -34,6 +34,7 @@ export interface AuthRepository {
   }): Promise<{ id: string; userId: string } | null>;
   findSessionById(id: string, now: Date): Promise<{ id: string; userId: string } | null>;
   revokeSession(tokenHash: string, now: Date): Promise<void>;
+  changePassword?(userId: string, passwordHash: string, now: Date): Promise<void>;
 }
 
 export function createAuthRepository(db: Database): AuthRepository {
@@ -134,6 +135,12 @@ export function createAuthRepository(db: Database): AuthRepository {
         .update(authSessions)
         .set({ revokedAt: now })
         .where(and(eq(authSessions.refreshTokenHash, tokenHash), isNull(authSessions.revokedAt)));
+    },
+    async changePassword(userId, passwordHash, now) {
+      await db.transaction(async (tx) => {
+        await tx.update(users).set({ passwordHash, updatedAt: now }).where(eq(users.id, userId));
+        await tx.update(authSessions).set({ revokedAt: now }).where(and(eq(authSessions.userId, userId), isNull(authSessions.revokedAt)));
+      });
     },
   };
 }

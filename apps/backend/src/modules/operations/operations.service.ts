@@ -40,6 +40,23 @@ function translateError(error: unknown): never {
     if (error.code === "SESSION_CLOSED") {
       throw new OperationsError(409, error.code, "Attendance is closed for this session.");
     }
+    if (error.code === "SESSION_NOT_OPEN") {
+      throw new OperationsError(
+        409,
+        error.code,
+        "Check-in opens one hour before the scheduled class.",
+      );
+    }
+    if (error.code === "SESSION_NOT_STARTED") {
+      throw new OperationsError(
+        409,
+        error.code,
+        "Check-out is available once the scheduled class starts.",
+      );
+    }
+    if (error.code === "COACH_NOT_CHECKED_IN") {
+      throw new OperationsError(409, error.code, "Check in to this class before checking out.");
+    }
     if (error.code === "SESSION_NOT_RESCHEDULABLE") {
       throw new OperationsError(
         409,
@@ -88,7 +105,11 @@ function isoDate(value: Date) {
   return value.toISOString();
 }
 
-export function createOperationsService(repository: OperationsRepository) {
+export function createOperationsService(
+  repository: OperationsRepository,
+  options: { now?: () => Date } = {},
+) {
+  const now = options.now ?? (() => new Date());
   return {
     async listBranches(academyId: string) {
       return repository.listBranches(academyId);
@@ -234,7 +255,12 @@ export function createOperationsService(repository: OperationsRepository) {
       }
     },
 
-    async listAttendance(academyId: string, from: Date, to: Date, filters?: { batchId?: string; recordedBy?: string }) {
+    async listAttendance(
+      academyId: string,
+      from: Date,
+      to: Date,
+      filters?: { batchId?: string; recordedBy?: string },
+    ) {
       const records = await repository.listAttendance(academyId, from, to, filters);
       return records.map((record) => ({
         ...record,
@@ -245,7 +271,16 @@ export function createOperationsService(repository: OperationsRepository) {
 
     async listAttendanceSessions(academyId: string, from: Date, to: Date, batchId?: string) {
       const sessions = await repository.listAttendanceSessions(academyId, from, to, batchId);
-      return sessions.map((session) => ({ ...session, startsAt: isoDate(session.startsAt), endsAt: isoDate(session.endsAt) }));
+      return sessions.map((session) => ({
+        ...session,
+        startsAt: isoDate(session.startsAt),
+        endsAt: isoDate(session.endsAt),
+        coachPresence: session.coachPresence.map((presence) => ({
+          ...presence,
+          checkedInAt: presence.checkedInAt ? isoDate(presence.checkedInAt) : null,
+          checkedOutAt: presence.checkedOutAt ? isoDate(presence.checkedOutAt) : null,
+        })),
+      }));
     },
 
     async listAttendanceCorrections(academyId: string, attendanceId: string) {
@@ -309,6 +344,8 @@ export function createOperationsService(repository: OperationsRepository) {
         ...session,
         startsAt: isoDate(session.startsAt),
         endsAt: isoDate(session.endsAt),
+        coachCheckedInAt: session.coachCheckedInAt ? isoDate(session.coachCheckedInAt) : null,
+        coachCheckedOutAt: session.coachCheckedOutAt ? isoDate(session.coachCheckedOutAt) : null,
       }));
     },
 
@@ -324,6 +361,12 @@ export function createOperationsService(repository: OperationsRepository) {
             ...roster.session,
             startsAt: isoDate(roster.session.startsAt),
             endsAt: isoDate(roster.session.endsAt),
+            coachCheckedInAt: roster.session.coachCheckedInAt
+              ? isoDate(roster.session.coachCheckedInAt)
+              : null,
+            coachCheckedOutAt: roster.session.coachCheckedOutAt
+              ? isoDate(roster.session.coachCheckedOutAt)
+              : null,
           },
           students: roster.students,
         };
@@ -338,6 +381,40 @@ export function createOperationsService(repository: OperationsRepository) {
       try {
         const records = await repository.recordAttendance(input);
         return records.map((record) => ({ ...record, recordedAt: isoDate(record.recordedAt) }));
+      } catch (error) {
+        translateError(error);
+      }
+    },
+
+    async checkInCoach(academyId: string, sessionId: string, userId: string) {
+      try {
+        const presence = await repository.recordCoachCheckIn({
+          academyId,
+          sessionId,
+          userId,
+          now: now(),
+        });
+        return {
+          checkedInAt: isoDate(presence.checkedInAt),
+          checkedOutAt: presence.checkedOutAt ? isoDate(presence.checkedOutAt) : null,
+        };
+      } catch (error) {
+        translateError(error);
+      }
+    },
+
+    async checkOutCoach(academyId: string, sessionId: string, userId: string) {
+      try {
+        const presence = await repository.recordCoachCheckOut({
+          academyId,
+          sessionId,
+          userId,
+          now: now(),
+        });
+        return {
+          checkedInAt: isoDate(presence.checkedInAt),
+          checkedOutAt: presence.checkedOutAt ? isoDate(presence.checkedOutAt) : null,
+        };
       } catch (error) {
         translateError(error);
       }

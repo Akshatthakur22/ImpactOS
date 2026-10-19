@@ -32,9 +32,12 @@ const owner: PublicUser = {
 describe("Phase 1 operations API", () => {
   const client = new PGlite();
   let coach: PublicUser | null = null;
+  let operationNow = new Date("2026-10-19T09:15:00.000Z");
   const app = (() => {
     const database = drizzlePGlite(client) as unknown as Database;
-    const operations = createOperationsService(createOperationsRepository(database));
+    const operations = createOperationsService(createOperationsRepository(database), {
+      now: () => operationNow,
+    });
     const progress = createProgressService(createProgressRepository(database));
     const auth = {
       async authenticate(token: string) {
@@ -185,6 +188,34 @@ describe("Phase 1 operations API", () => {
     expect(roster.status).toBe(200);
     expect(roster.body.data.students).toHaveLength(2);
 
+    operationNow = new Date("2026-10-19T07:59:00.000Z");
+    const tooEarlyCheckIn = await request(app)
+      .post(`/api/v1/coach/sessions/${session.body.data.id}/check-in`)
+      .set("Authorization", "Bearer coach-token");
+    expect(tooEarlyCheckIn.status).toBe(409);
+    expect(tooEarlyCheckIn.body.error.code).toBe("SESSION_NOT_OPEN");
+
+    operationNow = new Date("2026-10-19T08:59:00.000Z");
+    const tooEarlyCheckOut = await request(app)
+      .post(`/api/v1/coach/sessions/${session.body.data.id}/check-out`)
+      .set("Authorization", "Bearer coach-token");
+    expect(tooEarlyCheckOut.status).toBe(409);
+    expect(tooEarlyCheckOut.body.error.code).toBe("SESSION_NOT_STARTED");
+
+    operationNow = new Date("2026-10-19T09:15:00.000Z");
+    const checkIn = await request(app)
+      .post(`/api/v1/coach/sessions/${session.body.data.id}/check-in`)
+      .set("Authorization", "Bearer coach-token");
+    expect(checkIn.status).toBe(200);
+    expect(checkIn.body.data).toEqual({
+      checkedInAt: "2026-10-19T09:15:00.000Z",
+      checkedOutAt: null,
+    });
+    const repeatedCheckIn = await request(app)
+      .post(`/api/v1/coach/sessions/${session.body.data.id}/check-in`)
+      .set("Authorization", "Bearer coach-token");
+    expect(repeatedCheckIn.body.data.checkedInAt).toBe("2026-10-19T09:15:00.000Z");
+
     const progressEntry = await request(app)
       .post(`/api/v1/coach/sessions/${session.body.data.id}/progress`)
       .set("Authorization", "Bearer coach-token")
@@ -219,6 +250,18 @@ describe("Phase 1 operations API", () => {
       });
     expect(attendance.status).toBe(200);
     expect(attendance.body.data.records).toHaveLength(2);
+
+    operationNow = new Date("2026-10-19T10:05:00.000Z");
+    const checkOut = await request(app)
+      .post(`/api/v1/coach/sessions/${session.body.data.id}/check-out`)
+      .set("Authorization", "Bearer coach-token");
+    expect(checkOut.status).toBe(200);
+    expect(checkOut.body.data.checkedOutAt).toBe("2026-10-19T10:05:00.000Z");
+    operationNow = new Date("2026-10-19T10:15:00.000Z");
+    const repeatedCheckOut = await request(app)
+      .post(`/api/v1/coach/sessions/${session.body.data.id}/check-out`)
+      .set("Authorization", "Bearer coach-token");
+    expect(repeatedCheckOut.body.data.checkedOutAt).toBe("2026-10-19T10:05:00.000Z");
 
     const adminAttendance = await request(app)
       .get("/api/v1/attendance")
@@ -333,6 +376,7 @@ describe("Phase 1 operations API", () => {
     expect(attendanceQueue.body.data.sessions[0]).toMatchObject({
       expectedCount: 2,
       markedCount: 0,
+      coachPresence: [{ coachName: "Coach Priya", checkedInAt: null, checkedOutAt: null }],
     });
 
     const moved = await request(app)

@@ -47,6 +47,7 @@ describe("foundation migration", () => {
         "batch_coaches",
         "batch_schedules",
         "training_sessions",
+        "coach_session_presence",
         "attendance_records",
         "attendance_corrections",
         "academy_branches",

@@ -467,6 +467,20 @@ export const ParentStudentSchema = z.object({
 });
 export type ParentStudent = z.infer<typeof ParentStudentSchema>;
 
+export const UpdateParentProfileRequestSchema = z.object({
+  displayName: z.string().trim().min(1).max(160),
+  phone: z.string().trim().min(7).max(30).nullable(),
+});
+export const UpdateParentStudentRequestSchema = z.object({
+  firstName: z.string().trim().min(1).max(80),
+  lastName: z.string().trim().min(1).max(80),
+});
+export const ChangePasswordRequestSchema = z.object({
+  currentPassword: z.string().min(1).max(256),
+  newPassword: z.string().min(14).max(256),
+});
+export const ParentProfileSchema = z.object({ displayName: z.string(), phone: z.string().nullable() });
+
 export const ParentScheduleSchema = z.object({
   id: z.string().uuid(),
   batchId: z.string().uuid(),
@@ -980,6 +994,8 @@ export const TrainingSessionSchema = z.object({
   endsAt: z.string().datetime(),
   venue: z.string().nullable(),
   status: SessionStatusSchema,
+  coachCheckedInAt: z.string().datetime().nullable().default(null),
+  coachCheckedOutAt: z.string().datetime().nullable().default(null),
 });
 export type TrainingSession = z.infer<typeof TrainingSessionSchema>;
 
@@ -1039,6 +1055,15 @@ export const AttendanceSessionSummarySchema = z.object({
   status: SessionStatusSchema,
   expectedCount: z.number().int().nonnegative(),
   markedCount: z.number().int().nonnegative(),
+  coachPresence: z
+    .array(
+      z.object({
+        coachName: z.string().min(1),
+        checkedInAt: z.string().datetime().nullable(),
+        checkedOutAt: z.string().datetime().nullable(),
+      }),
+    )
+    .default([]),
 });
 export type AttendanceSessionSummary = z.infer<typeof AttendanceSessionSummarySchema>;
 

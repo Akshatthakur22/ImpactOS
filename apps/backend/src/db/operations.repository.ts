@@ -17,6 +17,7 @@ import {
   batchSchedules,
   batches,
   coachProfiles,
+  coachSessionPresence,
   enrollments,
   students,
   trainingSessions,
@@ -32,7 +33,10 @@ export class OperationsRepositoryError extends Error {
       | "SESSION_CLOSED"
       | "ATTENDANCE_INCOMPLETE"
       | "INVALID_ATTENDANCE"
-      | "SESSION_NOT_RESCHEDULABLE",
+      | "SESSION_NOT_RESCHEDULABLE"
+      | "SESSION_NOT_OPEN"
+      | "SESSION_NOT_STARTED"
+      | "COACH_NOT_CHECKED_IN",
   ) {
     super(code);
     this.name = "OperationsRepositoryError";
@@ -377,8 +381,17 @@ export function createOperationsRepository(db: Database) {
       )!;
     },
 
-    async listAttendance(academyId: string, from: Date, to: Date, filters: { batchId?: string; recordedBy?: string } = {}) {
-      const conditions = [eq(attendanceRecords.academyId, academyId), gte(trainingSessions.startsAt, from), lte(trainingSessions.startsAt, to)];
+    async listAttendance(
+      academyId: string,
+      from: Date,
+      to: Date,
+      filters: { batchId?: string; recordedBy?: string } = {},
+    ) {
+      const conditions = [
+        eq(attendanceRecords.academyId, academyId),
+        gte(trainingSessions.startsAt, from),
+        lte(trainingSessions.startsAt, to),
+      ];
       if (filters.batchId) conditions.push(eq(batches.id, filters.batchId));
       if (filters.recordedBy) conditions.push(eq(users.id, filters.recordedBy));
       const records = await db
@@ -400,9 +413,7 @@ export function createOperationsRepository(db: Database) {
         .innerJoin(students, eq(attendanceRecords.studentId, students.id))
         .innerJoin(batches, eq(trainingSessions.batchId, batches.id))
         .innerJoin(users, eq(attendanceRecords.recordedBy, users.id))
-        .where(
-          and(...conditions),
-        )
+        .where(and(...conditions))
         .orderBy(desc(trainingSessions.startsAt), asc(students.lastName), asc(students.firstName));
       if (records.length === 0) return [];
       const counts = await db
@@ -428,27 +439,110 @@ export function createOperationsRepository(db: Database) {
     },
 
     async listAttendanceSessions(academyId: string, from: Date, to: Date, batchId?: string) {
-      const conditions = [eq(trainingSessions.academyId, academyId), gte(trainingSessions.startsAt, from), lte(trainingSessions.startsAt, to), sql`${trainingSessions.status} <> 'cancelled'`];
+      const conditions = [
+        eq(trainingSessions.academyId, academyId),
+        gte(trainingSessions.startsAt, from),
+        lte(trainingSessions.startsAt, to),
+        sql`${trainingSessions.status} <> 'cancelled'`,
+      ];
       if (batchId) conditions.push(eq(batches.id, batchId));
-      return db.select({
-        id: trainingSessions.id,
-        batchId: batches.id,
-        batchName: batches.name,
-        branchName: academyBranches.name,
-        startsAt: trainingSessions.startsAt,
-        endsAt: trainingSessions.endsAt,
-        status: trainingSessions.status,
-        expectedCount: sql<number>`count(distinct ${enrollments.studentId})::int`,
-        markedCount: sql<number>`count(distinct ${attendanceRecords.studentId})::int`,
-      }).from(trainingSessions)
+      const sessions = await db
+        .select({
+          id: trainingSessions.id,
+          batchId: batches.id,
+          batchName: batches.name,
+          branchName: academyBranches.name,
+          startsAt: trainingSessions.startsAt,
+          endsAt: trainingSessions.endsAt,
+          status: trainingSessions.status,
+          expectedCount: sql<number>`count(distinct ${enrollments.studentId})::int`,
+          markedCount: sql<number>`count(distinct ${attendanceRecords.studentId})::int`,
+        })
+        .from(trainingSessions)
         .innerJoin(batches, eq(trainingSessions.batchId, batches.id))
         .leftJoin(batchSchedules, eq(trainingSessions.scheduleId, batchSchedules.id))
-        .leftJoin(academyBranches, and(eq(batchSchedules.branchId, academyBranches.id), eq(batchSchedules.academyId, academyBranches.academyId)))
-        .leftJoin(enrollments, and(eq(enrollments.academyId, academyId), eq(enrollments.batchId, batches.id), eq(enrollments.status, "active")))
-        .leftJoin(attendanceRecords, and(eq(attendanceRecords.academyId, academyId), eq(attendanceRecords.sessionId, trainingSessions.id)))
+        .leftJoin(
+          academyBranches,
+          and(
+            eq(batchSchedules.branchId, academyBranches.id),
+            eq(batchSchedules.academyId, academyBranches.academyId),
+          ),
+        )
+        .leftJoin(
+          enrollments,
+          and(
+            eq(enrollments.academyId, academyId),
+            eq(enrollments.batchId, batches.id),
+            eq(enrollments.status, "active"),
+          ),
+        )
+        .leftJoin(
+          attendanceRecords,
+          and(
+            eq(attendanceRecords.academyId, academyId),
+            eq(attendanceRecords.sessionId, trainingSessions.id),
+          ),
+        )
         .where(and(...conditions))
         .groupBy(trainingSessions.id, batches.id, batches.name, academyBranches.name)
         .orderBy(desc(trainingSessions.startsAt));
+      if (sessions.length === 0) return [];
+      const coachRows = await db
+        .select({
+          sessionId: trainingSessions.id,
+          coachName: users.displayName,
+          checkedInAt: coachSessionPresence.checkedInAt,
+          checkedOutAt: coachSessionPresence.checkedOutAt,
+        })
+        .from(trainingSessions)
+        .innerJoin(
+          batchCoaches,
+          and(
+            eq(batchCoaches.batchId, trainingSessions.batchId),
+            eq(batchCoaches.academyId, academyId),
+          ),
+        )
+        .innerJoin(
+          coachProfiles,
+          and(
+            eq(coachProfiles.id, batchCoaches.coachId),
+            eq(coachProfiles.academyId, academyId),
+            eq(coachProfiles.status, "active"),
+          ),
+        )
+        .innerJoin(users, and(eq(users.id, coachProfiles.userId), eq(users.isActive, true)))
+        .leftJoin(
+          coachSessionPresence,
+          and(
+            eq(coachSessionPresence.sessionId, trainingSessions.id),
+            eq(coachSessionPresence.coachId, users.id),
+          ),
+        )
+        .where(
+          and(
+            eq(trainingSessions.academyId, academyId),
+            inArray(
+              trainingSessions.id,
+              sessions.map((session) => session.id),
+            ),
+          ),
+        );
+      const coachesBySession = new Map<string, typeof coachRows>();
+      for (const coach of coachRows) {
+        const existing = coachesBySession.get(coach.sessionId) ?? [];
+        existing.push(coach);
+        coachesBySession.set(coach.sessionId, existing);
+      }
+      return sessions.map((session) => ({
+        ...session,
+        coachPresence: (coachesBySession.get(session.id) ?? []).map(
+          ({ coachName, checkedInAt, checkedOutAt }) => ({
+            coachName,
+            checkedInAt,
+            checkedOutAt,
+          }),
+        ),
+      }));
     },
 
     async listAttendanceCorrections(academyId: string, attendanceId: string) {
@@ -872,6 +966,8 @@ export function createOperationsRepository(db: Database) {
           venue: trainingSessions.venue,
           branchName: academyBranches.name,
           status: trainingSessions.status,
+          coachCheckedInAt: coachSessionPresence.checkedInAt,
+          coachCheckedOutAt: coachSessionPresence.checkedOutAt,
         })
         .from(trainingSessions)
         .innerJoin(batches, eq(trainingSessions.batchId, batches.id))
@@ -885,6 +981,13 @@ export function createOperationsRepository(db: Database) {
         )
         .innerJoin(batchCoaches, eq(batchCoaches.batchId, batches.id))
         .innerJoin(coachProfiles, eq(batchCoaches.coachId, coachProfiles.id))
+        .leftJoin(
+          coachSessionPresence,
+          and(
+            eq(coachSessionPresence.sessionId, trainingSessions.id),
+            eq(coachSessionPresence.coachId, coachProfiles.userId),
+          ),
+        )
         .where(
           and(
             eq(trainingSessions.academyId, academyId),
@@ -961,6 +1064,8 @@ export function createOperationsRepository(db: Database) {
           venue: trainingSessions.venue,
           branchName: academyBranches.name,
           status: trainingSessions.status,
+          coachCheckedInAt: coachSessionPresence.checkedInAt,
+          coachCheckedOutAt: coachSessionPresence.checkedOutAt,
         })
         .from(trainingSessions)
         .innerJoin(batches, eq(trainingSessions.batchId, batches.id))
@@ -974,6 +1079,13 @@ export function createOperationsRepository(db: Database) {
         )
         .innerJoin(batchCoaches, eq(batchCoaches.batchId, batches.id))
         .innerJoin(coachProfiles, eq(batchCoaches.coachId, coachProfiles.id))
+        .leftJoin(
+          coachSessionPresence,
+          and(
+            eq(coachSessionPresence.sessionId, trainingSessions.id),
+            eq(coachSessionPresence.coachId, coachProfiles.userId),
+          ),
+        )
         .where(
           and(
             eq(trainingSessions.id, sessionId),
@@ -1016,6 +1128,147 @@ export function createOperationsRepository(db: Database) {
           status: student.status,
         })),
       };
+    },
+
+    async recordCoachCheckIn(input: {
+      academyId: string;
+      sessionId: string;
+      userId: string;
+      now: Date;
+    }) {
+      return db.transaction(async (tx) => {
+        const [session] = await tx
+          .select({ startsAt: trainingSessions.startsAt, status: trainingSessions.status })
+          .from(trainingSessions)
+          .innerJoin(batches, eq(trainingSessions.batchId, batches.id))
+          .innerJoin(
+            batchCoaches,
+            and(eq(batchCoaches.batchId, batches.id), eq(batchCoaches.academyId, input.academyId)),
+          )
+          .innerJoin(
+            coachProfiles,
+            and(
+              eq(coachProfiles.id, batchCoaches.coachId),
+              eq(coachProfiles.academyId, input.academyId),
+              eq(coachProfiles.status, "active"),
+            ),
+          )
+          .where(
+            and(
+              eq(trainingSessions.id, input.sessionId),
+              eq(trainingSessions.academyId, input.academyId),
+              eq(coachProfiles.userId, input.userId),
+            ),
+          )
+          .for("update", { of: trainingSessions })
+          .limit(1);
+        if (!session) throw new OperationsRepositoryError("COACH_NOT_ASSIGNED");
+        if (session.status !== "scheduled") throw new OperationsRepositoryError("SESSION_CLOSED");
+        if (input.now.getTime() < session.startsAt.getTime() - 60 * 60_000) {
+          throw new OperationsRepositoryError("SESSION_NOT_OPEN");
+        }
+        const [existing] = await tx
+          .select({
+            checkedInAt: coachSessionPresence.checkedInAt,
+            checkedOutAt: coachSessionPresence.checkedOutAt,
+          })
+          .from(coachSessionPresence)
+          .where(
+            and(
+              eq(coachSessionPresence.academyId, input.academyId),
+              eq(coachSessionPresence.sessionId, input.sessionId),
+              eq(coachSessionPresence.coachId, input.userId),
+            ),
+          )
+          .limit(1);
+        if (existing) return existing;
+        const [presence] = await tx
+          .insert(coachSessionPresence)
+          .values({
+            academyId: input.academyId,
+            sessionId: input.sessionId,
+            coachId: input.userId,
+            checkedInAt: input.now,
+          })
+          .returning({
+            checkedInAt: coachSessionPresence.checkedInAt,
+            checkedOutAt: coachSessionPresence.checkedOutAt,
+          });
+        if (!presence) throw new Error("Coach check-in insert returned no record.");
+        return presence;
+      });
+    },
+
+    async recordCoachCheckOut(input: {
+      academyId: string;
+      sessionId: string;
+      userId: string;
+      now: Date;
+    }) {
+      return db.transaction(async (tx) => {
+        const [session] = await tx
+          .select({ startsAt: trainingSessions.startsAt, status: trainingSessions.status })
+          .from(trainingSessions)
+          .innerJoin(batches, eq(trainingSessions.batchId, batches.id))
+          .innerJoin(
+            batchCoaches,
+            and(eq(batchCoaches.batchId, batches.id), eq(batchCoaches.academyId, input.academyId)),
+          )
+          .innerJoin(
+            coachProfiles,
+            and(
+              eq(coachProfiles.id, batchCoaches.coachId),
+              eq(coachProfiles.academyId, input.academyId),
+              eq(coachProfiles.status, "active"),
+            ),
+          )
+          .where(
+            and(
+              eq(trainingSessions.id, input.sessionId),
+              eq(trainingSessions.academyId, input.academyId),
+              eq(coachProfiles.userId, input.userId),
+            ),
+          )
+          .for("update", { of: trainingSessions })
+          .limit(1);
+        if (!session) throw new OperationsRepositoryError("COACH_NOT_ASSIGNED");
+        if (session.status !== "scheduled") throw new OperationsRepositoryError("SESSION_CLOSED");
+        if (input.now < session.startsAt)
+          throw new OperationsRepositoryError("SESSION_NOT_STARTED");
+        const [existing] = await tx
+          .select({
+            checkedInAt: coachSessionPresence.checkedInAt,
+            checkedOutAt: coachSessionPresence.checkedOutAt,
+          })
+          .from(coachSessionPresence)
+          .where(
+            and(
+              eq(coachSessionPresence.academyId, input.academyId),
+              eq(coachSessionPresence.sessionId, input.sessionId),
+              eq(coachSessionPresence.coachId, input.userId),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!existing) throw new OperationsRepositoryError("COACH_NOT_CHECKED_IN");
+        if (existing.checkedOutAt) return existing;
+        const [presence] = await tx
+          .update(coachSessionPresence)
+          .set({ checkedOutAt: input.now })
+          .where(
+            and(
+              eq(coachSessionPresence.academyId, input.academyId),
+              eq(coachSessionPresence.sessionId, input.sessionId),
+              eq(coachSessionPresence.coachId, input.userId),
+            ),
+          )
+          .returning({
+            checkedInAt: coachSessionPresence.checkedInAt,
+            checkedOutAt: coachSessionPresence.checkedOutAt,
+          });
+        if (!presence) throw new Error("Coach check-out update returned no record.");
+        return presence;
+      });
     },
 
     async recordAttendance(input: {

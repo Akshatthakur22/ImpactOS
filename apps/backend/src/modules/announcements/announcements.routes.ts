@@ -5,6 +5,7 @@ import type { SportDeskAuthService } from "../auth/auth.service.js";
 import { authenticatedUser, requirePermission } from "../auth/authorization.js";
 import { AuthError } from "../auth/auth.service.js";
 import type { SportDeskAnnouncementsService } from "./announcements.service.js";
+import type { SportDeskPushService } from "../push/push.service.js";
 
 function requireRole(role: "owner" | "parent" | "coach", actualRole: string) {
   if (actualRole !== role) {
@@ -16,6 +17,7 @@ function requireRole(role: "owner" | "parent" | "coach", actualRole: string) {
 export function createAnnouncementsRouter(options: {
   auth: SportDeskAuthService;
   announcements: SportDeskAnnouncementsService;
+  push?: SportDeskPushService;
 }): Router {
   const router = Router();
 
@@ -54,6 +56,7 @@ export function createAnnouncementsRouter(options: {
       academyId: user.academyId,
       announcementId: z.string().uuid().parse(request.params.announcementId),
     });
+    if (options.push) void options.push.announcementPublished(user.academyId, z.string().uuid().parse(request.params.announcementId)).catch(() => console.warn("Announcement push preparation failed."));
     response.status(200).json({ data: result });
   });
 

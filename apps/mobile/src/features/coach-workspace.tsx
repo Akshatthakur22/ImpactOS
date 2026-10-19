@@ -410,6 +410,7 @@ export function CoachWorkspace({
         onAuthUpdate,
       );
       setRoster(result);
+      setSelected({ ...session, ...result.session });
       setAttendance(
         Object.fromEntries(
           result.students.flatMap((student) =>
@@ -422,6 +423,50 @@ export function CoachWorkspace({
       setSelected(null);
     } finally {
       setRosterLoading(false);
+    }
+  }
+
+  async function recordSessionTime(action: "check-in" | "check-out") {
+    if (!selected) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const presence = await requestMobileData(
+        `/coach/sessions/${selected.id}/${action}`,
+        (value) =>
+          z
+            .object({
+              checkedInAt: z.string().datetime(),
+              checkedOutAt: z.string().datetime().nullable(),
+            })
+            .parse(value),
+        auth,
+        onAuthUpdate,
+        { method: "POST" },
+      );
+      const updateSession = (session: TrainingSession): TrainingSession =>
+        session.id === selected.id
+          ? {
+              ...session,
+              coachCheckedInAt: presence.checkedInAt,
+              coachCheckedOutAt: presence.checkedOutAt,
+            }
+          : session;
+      setSelected((current) => (current ? updateSession(current) : current));
+      setSessions((current) => current.map(updateSession));
+      setRoster((current) =>
+        current ? { ...current, session: updateSession(current.session) } : current,
+      );
+      setNotice(
+        action === "check-in"
+          ? "Your class check-in time is recorded."
+          : "Your class check-out time is recorded.",
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : `Could not record ${action}.`);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -619,6 +664,44 @@ export function CoachWorkspace({
               This class is complete. Attendance is read-only.
             </Text>
           ) : null}
+          <View style={styles.sessionPresenceCard}>
+            <Text style={styles.sessionPresenceTitle}>Coach time</Text>
+            {selected.coachCheckedInAt ? (
+              <Text style={styles.sessionPresenceText}>
+                Checked in · {formatTime(selected.coachCheckedInAt, timeZone)}
+              </Text>
+            ) : null}
+            {selected.coachCheckedOutAt ? (
+              <Text style={styles.sessionPresenceText}>
+                Checked out · {formatTime(selected.coachCheckedOutAt, timeZone)}
+              </Text>
+            ) : null}
+            {!readOnly && !selected.coachCheckedInAt ? (
+              <Pressable
+                accessibilityRole="button"
+                disabled={busy}
+                onPress={() => void recordSessionTime("check-in")}
+                style={[styles.presenceButton, busy && styles.disabled]}
+              >
+                <Text style={styles.presenceButtonText}>Check in to class</Text>
+              </Pressable>
+            ) : null}
+            {!readOnly && selected.coachCheckedInAt && !selected.coachCheckedOutAt ? (
+              <Pressable
+                accessibilityRole="button"
+                disabled={busy}
+                onPress={() => void recordSessionTime("check-out")}
+                style={[styles.presenceButton, busy && styles.disabled]}
+              >
+                <Text style={styles.presenceButtonText}>Check out of class</Text>
+              </Pressable>
+            ) : null}
+            {!selected.coachCheckedInAt && !readOnly ? (
+              <Text style={styles.sessionPresenceHint}>
+                Record your arrival before taking attendance.
+              </Text>
+            ) : null}
+          </View>
         </View>
         {!roster.students.length ? (
           <EmptyState
@@ -1159,6 +1242,26 @@ const styles = StyleSheet.create({
   sessionMain: { flex: 1 },
   sessionName: { color: colors.ink, fontSize: 14, fontWeight: "600" },
   sessionDetail: { marginTop: 4, color: colors.muted, fontSize: 11, lineHeight: 16 },
+  sessionPresenceCard: {
+    marginTop: 14,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  sessionPresenceTitle: { color: colors.ink, fontSize: 12, fontWeight: "700" },
+  sessionPresenceText: { marginTop: 6, color: colors.text, fontSize: 12 },
+  sessionPresenceHint: { marginTop: 7, color: colors.muted, fontSize: 11 },
+  presenceButton: {
+    alignSelf: "flex-start",
+    marginTop: 10,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
+    borderRadius: 9,
+    backgroundColor: colors.brandSoft,
+  },
+  presenceButtonText: { color: colors.brand, fontSize: 12, fontWeight: "700" },
   sessionState: { marginTop: 5, color: colors.brand, fontSize: 10, fontWeight: "600" },
   completedText: { color: colors.success },
   cancelledText: { color: colors.muted },

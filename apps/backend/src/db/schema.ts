@@ -194,7 +194,11 @@ export const passwordResetTokens = pgTable(
   },
   (table) => [
     uniqueIndex("password_reset_tokens_hash_uq").on(table.tokenHash),
-    index("password_reset_tokens_user_expiry_idx").on(table.academyId, table.userId, table.expiresAt),
+    index("password_reset_tokens_user_expiry_idx").on(
+      table.academyId,
+      table.userId,
+      table.expiresAt,
+    ),
     foreignKey({
       name: "password_reset_tokens_user_academy_fk",
       columns: [table.userId, table.academyId],
@@ -992,6 +996,36 @@ export const trainingSessions = pgTable(
   ],
 );
 
+export const coachSessionPresence = pgTable(
+  "coach_session_presence",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    academyId: uuid("academy_id").notNull(),
+    sessionId: uuid("session_id").notNull(),
+    coachId: uuid("coach_id").notNull(),
+    checkedInAt: timestamp("checked_in_at", { withTimezone: true, mode: "date" }).notNull(),
+    checkedOutAt: timestamp("checked_out_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    uniqueIndex("coach_session_presence_session_coach_uq").on(table.sessionId, table.coachId),
+    index("coach_session_presence_academy_session_idx").on(table.academyId, table.sessionId),
+    check(
+      "coach_session_presence_checkout_order_chk",
+      sql`${table.checkedOutAt} is null or ${table.checkedOutAt} >= ${table.checkedInAt}`,
+    ),
+    foreignKey({
+      name: "coach_session_presence_session_academy_fk",
+      columns: [table.sessionId, table.academyId],
+      foreignColumns: [trainingSessions.id, trainingSessions.academyId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "coach_session_presence_coach_academy_fk",
+      columns: [table.coachId, table.academyId],
+      foreignColumns: [users.id, users.academyId],
+    }).onDelete("restrict"),
+  ],
+);
+
 export const attendanceRecords = pgTable(
   "attendance_records",
   {
@@ -1046,11 +1080,27 @@ export const progressEntries = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
   },
   (table) => [
-    index("progress_entries_student_created_idx").on(table.academyId, table.studentId, table.createdAt),
+    index("progress_entries_student_created_idx").on(
+      table.academyId,
+      table.studentId,
+      table.createdAt,
+    ),
     index("progress_entries_session_idx").on(table.academyId, table.sessionId),
-    foreignKey({ name: "progress_entries_student_academy_fk", columns: [table.studentId, table.academyId], foreignColumns: [students.id, students.academyId] }).onDelete("restrict"),
-    foreignKey({ name: "progress_entries_session_academy_fk", columns: [table.sessionId, table.academyId], foreignColumns: [trainingSessions.id, trainingSessions.academyId] }).onDelete("restrict"),
-    foreignKey({ name: "progress_entries_coach_academy_fk", columns: [table.coachId, table.academyId], foreignColumns: [users.id, users.academyId] }).onDelete("restrict"),
+    foreignKey({
+      name: "progress_entries_student_academy_fk",
+      columns: [table.studentId, table.academyId],
+      foreignColumns: [students.id, students.academyId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "progress_entries_session_academy_fk",
+      columns: [table.sessionId, table.academyId],
+      foreignColumns: [trainingSessions.id, trainingSessions.academyId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "progress_entries_coach_academy_fk",
+      columns: [table.coachId, table.academyId],
+      foreignColumns: [users.id, users.academyId],
+    }).onDelete("restrict"),
   ],
 );
 
