@@ -2,6 +2,7 @@ import type {
   AddInquiryActivityRequest,
   CreateInquiryRequest,
   InquiryListQuery,
+  PublicInquiryRequest,
 } from "@sportdesk/contracts";
 import type { AdmissionsRepository } from "../../db/admissions.repository.js";
 
@@ -76,11 +77,50 @@ export function createAdmissionsService(repository: AdmissionsRepository) {
           "This batch has reached its configured capacity.",
         );
       default:
-        throw new AdmissionsError(500, "ADMISSIONS_ERROR", "The admissions operation could not be completed.");
+        throw new AdmissionsError(
+          500,
+          "ADMISSIONS_ERROR",
+          "The admissions operation could not be completed.",
+        );
     }
   }
 
   return {
+    async createExternal(input: {
+      academyId: string;
+      source: "website" | "google_forms";
+      externalSubmissionId: string;
+      inquiry: PublicInquiryRequest;
+    }) {
+      const result = await repository.createExternal({
+        ...input,
+        inquiry: {
+          studentFirstName: input.inquiry.studentFirstName,
+          studentLastName: input.inquiry.studentLastName,
+          contactName: input.inquiry.contactName,
+          ...(input.inquiry.contactEmail ? { contactEmail: input.inquiry.contactEmail } : {}),
+          ...(input.inquiry.contactPhone ? { contactPhone: input.inquiry.contactPhone } : {}),
+          relationship: input.inquiry.relationship ?? "Parent",
+          source: input.source === "website" ? "Website" : "Google Forms",
+          ...(input.inquiry.programId ? { programId: input.inquiry.programId } : {}),
+          ...(input.inquiry.notes ? { notes: input.inquiry.notes } : {}),
+        },
+      });
+      if (result.kind === "related_record_not_found")
+        throw new AdmissionsError(
+          400,
+          "RELATED_RECORD_NOT_FOUND",
+          "The selected academy record was not found.",
+        );
+      if (result.kind === "created" || result.kind === "potential_duplicate")
+        return { kind: result.kind, inquiryId: result.id };
+      return { kind: result.kind };
+    },
+
+    async overview(academyId: string) {
+      return repository.overview(academyId);
+    },
+
     async list(academyId: string, query: InquiryListQuery) {
       const result = await repository.list(academyId, query);
       return { ...result, inquiries: result.inquiries.map(mapInquiry) };

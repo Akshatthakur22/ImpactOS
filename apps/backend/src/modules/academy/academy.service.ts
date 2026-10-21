@@ -3,6 +3,7 @@ import type {
   CreateDisciplineRequest,
   CreateProgramRequest,
   CreateStudentRequest,
+  AddStudentGuardianRequest,
   UpdateAcademySettingsRequest,
   UpdateBatchRequest,
   UpdateDisciplineRequest,
@@ -83,6 +84,13 @@ function translateError(error: unknown): never {
         "Batch capacity cannot be lower than its current active enrollment count.",
       );
     }
+    if (error.code === "STUDENT_HAS_HISTORY") {
+      throw new AcademyError(
+        409,
+        error.code,
+        "This student has linked academy history and cannot be deleted. Change their status to Withdrawn to retain the record safely.",
+      );
+    }
     throw new AcademyError(
       409,
       "ALREADY_ENROLLED",
@@ -110,15 +118,13 @@ export function createAcademyService(repository: AcademyRepository) {
   return {
     async getSettings(academyId: string) {
       const settings = await repository.getSettings(academyId);
-      if (!settings)
-        throw new AcademyError(404, "ACADEMY_NOT_FOUND", "The academy was not found.");
+      if (!settings) throw new AcademyError(404, "ACADEMY_NOT_FOUND", "The academy was not found.");
       return settings;
     },
 
     async updateSettings(academyId: string, changes: UpdateAcademySettingsRequest) {
       const settings = await repository.updateSettings({ academyId, changes });
-      if (!settings)
-        throw new AcademyError(404, "ACADEMY_NOT_FOUND", "The academy was not found.");
+      if (!settings) throw new AcademyError(404, "ACADEMY_NOT_FOUND", "The academy was not found.");
       return settings;
     },
 
@@ -203,6 +209,13 @@ export function createAcademyService(repository: AcademyRepository) {
       };
     },
 
+    async getStudent(academyId: string, studentId: string) {
+      const result = await repository.listStudents(academyId, { offset: 0, limit: 1 }, studentId);
+      const student = result.students[0];
+      if (!student) throw new AcademyError(404, "STUDENT_NOT_FOUND", "Student record not found.");
+      return { ...student, createdAt: student.createdAt.toISOString() };
+    },
+
     async createStudent(input: CreateStudentRequest & { academyId: string; createdBy: string }) {
       try {
         const student = await repository.createStudent(input);
@@ -238,6 +251,14 @@ export function createAcademyService(repository: AcademyRepository) {
       }
     },
 
+    async deleteStudent(input: { academyId: string; studentId: string }) {
+      try {
+        return await repository.deleteStudent(input);
+      } catch (error) {
+        translateError(error);
+      }
+    },
+
     async updateStudentGuardian(input: {
       academyId: string;
       studentId: string;
@@ -247,6 +268,20 @@ export function createAcademyService(repository: AcademyRepository) {
       try {
         await repository.updateStudentGuardian(input);
         return { updated: true };
+      } catch (error) {
+        translateError(error);
+      }
+    },
+
+    async addStudentGuardian(
+      input: AddStudentGuardianRequest & {
+        academyId: string;
+        createdBy: string;
+        studentId: string;
+      },
+    ) {
+      try {
+        return await repository.addStudentGuardian(input);
       } catch (error) {
         translateError(error);
       }

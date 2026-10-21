@@ -2,7 +2,12 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import type { AcademyCatalog, Inquiry, InquiryStatus } from "@sportdesk/contracts";
+import type {
+  AcademyCatalog,
+  AdmissionsOverview,
+  Inquiry,
+  InquiryStatus,
+} from "@sportdesk/contracts";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
 import { Input } from "@/components/ui/input";
@@ -13,6 +18,7 @@ import {
   createInquiry,
   getInquiry,
   getInquiries,
+  getAdmissionsOverview,
 } from "@/lib/admissions-api";
 import { getAcademyCatalog } from "@/lib/academy-api";
 
@@ -55,11 +61,13 @@ function statusTone(status: InquiryStatus) {
 export default function AdmissionsPage() {
   const { accessToken, refreshSession } = useAuth();
   const [catalog, setCatalog] = useState<AcademyCatalog | null>(null);
+  const [overview, setOverview] = useState<AdmissionsOverview | null>(null);
   const [inquiries, setInquiries] = useState<Inquiry[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Inquiry | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<InquiryStatus | "all">("all");
+  const [sourceFilter, setSourceFilter] = useState("");
   const [followUpFilter, setFollowUpFilter] = useState<"all" | "due" | "upcoming" | "none">("all");
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -94,12 +102,13 @@ export default function AdmissionsPage() {
     const result = await getInquiries(accessToken, refreshSession, {
       search: search.trim() || undefined,
       status: statusFilter === "all" ? undefined : statusFilter,
+      source: sourceFilter || undefined,
       followUp: followUpFilter === "all" ? undefined : followUpFilter,
       limit: 100,
     });
     setInquiries(result.inquiries);
     if (!selectedId && result.inquiries[0]) setSelectedId(result.inquiries[0].id);
-  }, [accessToken, refreshSession, search, statusFilter, followUpFilter, selectedId]);
+  }, [accessToken, refreshSession, search, statusFilter, sourceFilter, followUpFilter, selectedId]);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -108,11 +117,13 @@ export default function AdmissionsPage() {
     Promise.all([
       getInquiries(accessToken, refreshSession, { limit: 100 }),
       getAcademyCatalog(accessToken, refreshSession),
+      getAdmissionsOverview(accessToken, refreshSession),
     ])
-      .then(([list, nextCatalog]) => {
+      .then(([list, nextCatalog, nextOverview]) => {
         if (!active) return;
         setInquiries(list.inquiries);
         setCatalog(nextCatalog);
+        setOverview(nextOverview);
         if (list.inquiries[0]) setSelectedId(list.inquiries[0].id);
       })
       .catch((caught: unknown) => {
@@ -133,6 +144,7 @@ export default function AdmissionsPage() {
     getInquiries(accessToken, refreshSession, {
       search: search.trim() || undefined,
       status: statusFilter === "all" ? undefined : statusFilter,
+      source: sourceFilter || undefined,
       followUp: followUpFilter === "all" ? undefined : followUpFilter,
       limit: 100,
     })
@@ -152,7 +164,7 @@ export default function AdmissionsPage() {
     return () => {
       active = false;
     };
-  }, [accessToken, refreshSession, search, statusFilter, followUpFilter, selectedId]);
+  }, [accessToken, refreshSession, search, statusFilter, sourceFilter, followUpFilter, selectedId]);
 
   useEffect(() => {
     if (!accessToken || !selectedId) {
@@ -289,10 +301,53 @@ export default function AdmissionsPage() {
 
   return (
     <section className="sd-page">
-      <PageHeader eyebrow="People" title="Admissions" description="Track prospective students, record each contact, and convert a successful inquiry into an academy record."
-        actions={<Button onClick={() => setShowCreate((open) => !open)}>
-          {showCreate ? "Close form" : "New inquiry"}
-        </Button>} />
+      <PageHeader
+        eyebrow="People"
+        title="Admissions"
+        description="Track prospective students, record each contact, and convert a successful inquiry into an academy record."
+        actions={
+          <Button onClick={() => setShowCreate((open) => !open)}>
+            {showCreate ? "Close form" : "New inquiry"}
+          </Button>
+        }
+      />
+
+      {overview ? (
+        <section
+          aria-label="Admissions overview for the last 30 days"
+          className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4"
+        >
+          {[
+            ["New inquiries · 30 days", overview.createdInRange],
+            ["Awaiting first contact", overview.awaitingFirstContact],
+            ["Follow-ups due today", overview.dueToday],
+            ["Overdue follow-ups", overview.overdue],
+            ["Active inquiries", overview.active],
+            ["Converted · 30 days", overview.convertedInRange],
+            ["Conversion rate", `${overview.conversionRate}%`],
+          ].map(([label, value]) => (
+            <article key={label} className="rounded-xl border border-line bg-white p-4">
+              <p className="text-xs text-muted">{label}</p>
+              <p className="mt-2 text-2xl font-semibold">{value}</p>
+            </article>
+          ))}
+        </section>
+      ) : null}
+      {overview?.bySource.length ? (
+        <section
+          aria-label="Inquiry and conversion counts by original source"
+          className="mt-4 rounded-xl border border-line bg-white p-4"
+        >
+          <h2 className="text-sm font-semibold">Original source · last 30 days</h2>
+          <ul className="mt-2 flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted">
+            {overview.bySource.map((row) => (
+              <li key={row.source}>
+                {row.source}: {row.inquiries} inquiries · {row.converted} converted
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {error ? (
         <div
@@ -472,6 +527,12 @@ export default function AdmissionsPage() {
                   </option>
                 ))}
               </select>
+              <Input
+                aria-label="Filter by source"
+                placeholder="Filter source"
+                value={sourceFilter}
+                onChange={(event) => setSourceFilter(event.target.value)}
+              />
               <select
                 aria-label="Filter follow-ups"
                 className="h-11 rounded-xl border border-line bg-white px-3 text-sm sm:col-span-2"
@@ -507,6 +568,11 @@ export default function AdmissionsPage() {
                       <span className="font-semibold">
                         {inquiry.studentFirstName} {inquiry.studentLastName}
                       </span>
+                      {inquiry.needsReview ? (
+                        <span className="ml-2 rounded-full bg-[#fff3dc] px-2 py-1 text-[10px] font-semibold text-[#8a6418]">
+                          Possible duplicate · review
+                        </span>
+                      ) : null}
                       <span
                         className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${statusTone(inquiry.status)}`}
                       >

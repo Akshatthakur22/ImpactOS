@@ -79,6 +79,10 @@ export async function syncCoachClassReminders(
   sessions: readonly { id: string; batchName: string; startsAt: string; status: string }[],
 ) {
   if (Platform.OS !== "ios" && Platform.OS !== "android") return;
+  // Expo Go may not include every native module required by the installed
+  // expo-notifications version. Keep its missing-module error out of app startup;
+  // reminders and push registration are available in a development build.
+  if (runningInExpoGo()) return;
   try {
     const Notifications = await loadNotifications();
     const permission = await Notifications.getPermissionsAsync();

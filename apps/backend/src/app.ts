@@ -56,6 +56,8 @@ export type AppOptions = {
   secureCookies: boolean;
   sessionTtlDays: number;
   trustProxyHops?: number;
+  publicAdmissionsAcademyId?: string;
+  publicAdmissionsWebOrigin?: string;
 };
 
 export function createApp(options: AppOptions): Express {
@@ -66,7 +68,11 @@ export function createApp(options: AppOptions): Express {
   app.use(
     cors({
       origin(origin, callback) {
-        if (!origin || origin === options.webOrigin) {
+        if (
+          !origin ||
+          origin === options.webOrigin ||
+          origin === options.publicAdmissionsWebOrigin
+        ) {
           callback(null, true);
           return;
         }
@@ -133,6 +139,19 @@ export function createApp(options: AppOptions): Express {
       },
     },
   });
+  const publicAdmissionsLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 12,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    message: {
+      error: {
+        code: "RATE_LIMITED",
+        message: "Too many inquiry submissions. Please try again later.",
+      },
+    },
+  });
+  app.use("/api/v1/public/admissions/inquiries", publicAdmissionsLimiter);
   app.use("/api/v1/auth/password-reset", passwordResetLimiter);
   app.use(
     "/api/v1/auth",
@@ -183,7 +202,13 @@ export function createApp(options: AppOptions): Express {
   if (options.admissions) {
     app.use(
       "/api/v1",
-      createAdmissionsRouter({ auth: options.auth, admissions: options.admissions }),
+      createAdmissionsRouter({
+        auth: options.auth,
+        admissions: options.admissions,
+        ...(options.publicAdmissionsAcademyId
+          ? { publicAcademyId: options.publicAdmissionsAcademyId }
+          : {}),
+      }),
     );
   }
   if (options.users) {

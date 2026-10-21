@@ -45,6 +45,7 @@ describe("admissions API", () => {
       webOrigin: origin,
       secureCookies: false,
       sessionTtlDays: 30,
+      publicAdmissionsAcademyId: academyId,
     });
   })();
 
@@ -91,6 +92,33 @@ describe("admissions API", () => {
       .get("/api/v1/inquiries")
       .set("Authorization", "Bearer coach-token");
     expect(coachDenied.status).toBe(403);
+
+    const publicPayload = {
+      studentFirstName: "Nisha",
+      studentLastName: "Rao",
+      contactName: "Arun Rao",
+      contactEmail: "arun@example.test",
+      consent: true,
+    };
+    const publicResponse = await request(app)
+      .post("/api/v1/public/admissions/inquiries")
+      .set("Idempotency-Key", "website-form-response-0001")
+      .send(publicPayload);
+    expect(publicResponse.status).toBe(202);
+    const repeatedPublicResponse = await request(app)
+      .post("/api/v1/public/admissions/inquiries")
+      .set("Idempotency-Key", "website-form-response-0001")
+      .send(publicPayload);
+    expect(repeatedPublicResponse.status).toBe(202);
+    const publicRows = await database.query<{ total: number; events: number }>(
+      "SELECT (SELECT count(*)::int FROM inquiries WHERE source = 'Website') AS total, (SELECT count(*)::int FROM inquiry_source_submissions WHERE source = 'website') AS events",
+    );
+    expect(publicRows.rows[0]).toEqual({ total: 1, events: 1 });
+    const admissionsOverview = await request(app)
+      .get("/api/v1/admissions/overview")
+      .set("Authorization", "Bearer owner-token");
+    expect(admissionsOverview.status).toBe(200);
+    expect(admissionsOverview.body.data.createdInRange).toBe(1);
 
     const invalid = await request(app)
       .post("/api/v1/inquiries")

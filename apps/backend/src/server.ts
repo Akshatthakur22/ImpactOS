@@ -111,6 +111,12 @@ const app = createApp({
   secureCookies: env.NODE_ENV === "production",
   sessionTtlDays: env.SESSION_TTL_DAYS,
   trustProxyHops: env.TRUST_PROXY_HOPS,
+  ...(env.PUBLIC_ADMISSIONS_ACADEMY_ID
+    ? { publicAdmissionsAcademyId: env.PUBLIC_ADMISSIONS_ACADEMY_ID }
+    : {}),
+  ...(env.PUBLIC_ADMISSIONS_WEB_ORIGIN
+    ? { publicAdmissionsWebOrigin: env.PUBLIC_ADMISSIONS_WEB_ORIGIN }
+    : {}),
 });
 
 const server = app.listen(env.PORT, () => {

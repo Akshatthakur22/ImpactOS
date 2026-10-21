@@ -61,6 +61,7 @@ describe("foundation migration", () => {
         "finance_counters",
         "inquiries",
         "inquiry_activities",
+        "inquiry_source_submissions",
       ]),
     );
   });

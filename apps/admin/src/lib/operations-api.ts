@@ -7,6 +7,7 @@ import {
   AttendanceSessionSummarySchema,
   AttendanceCorrectionEntrySchema,
   CoachSchema,
+  CoachProfileDetailSchema,
   CorrectAttendanceRequestSchema,
   GuardianInviteSchema,
   RevokedInviteSchema,
@@ -25,6 +26,7 @@ import {
   type RescheduleSessionRequest,
   type CorrectAttendanceRequest,
   type Coach,
+  type CoachProfileDetail,
   type AcademyBranch,
   type Schedule,
   type UpdateCoachRequest,
@@ -84,6 +86,14 @@ export async function getCoaches(token: string, refresh: RefreshSession) {
     token,
     refresh,
   );
+}
+
+export async function getCoach(token: string, refresh: RefreshSession, coachId: string) {
+  return requestData(`/coaches/${coachId}`, (value: unknown) => CoachProfileDetailSchema.parse(value) as CoachProfileDetail, token, refresh);
+}
+
+export async function deleteCoach(token: string, refresh: RefreshSession, coachId: string) {
+  return requestData(`/coaches/${coachId}`, (value: unknown) => value as { deleted: boolean }, token, refresh, { method: "DELETE" });
 }
 
 export async function getBranches(token: string, refresh: RefreshSession) {
@@ -167,6 +177,10 @@ export async function assignCoach(
     refresh,
     body({ coachId }),
   );
+}
+
+export async function unassignCoach(token: string, refresh: RefreshSession, batchId: string, coachId: string) {
+  return requestData(`/batches/${batchId}/coaches/${coachId}`, (value: unknown) => value as { deleted: boolean }, token, refresh, { method: "DELETE" });
 }
 
 export async function getSchedules(token: string, refresh: RefreshSession) {

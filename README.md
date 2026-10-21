@@ -9,6 +9,10 @@ SportDesk is a modular academy operations system being built for Impact Fit Acad
 - `apps/backend` — Express API, Drizzle schema, and migrations.
 - `packages/contracts` — shared Zod request and response contracts.
 
+## Product design reference
+
+[`docs/master-design-guide.md`](docs/master-design-guide.md) is the shared design reference for the full project: public-facing pages, the administrator ERP, and coach and parent experiences on web and mobile. Project contributors should follow it for UI, UX, content, accessibility, and responsive behavior. The root [`AGENTS.md`](AGENTS.md) makes this guidance apply across the workspace.
+
 The clients call the backend API. Only the backend connects to PostgreSQL.
 
 ## Requirements
@@ -54,4 +58,4 @@ Phase 0 provides short-lived access tokens, rotating database-backed refresh ses
 
 Phase 1 includes coach accounts and batch assignments, editable recurring schedules with idempotent session generation, session reschedule/cancel controls, coach class check-in/out, mobile attendance with a secure offline retry queue, owner session-first attendance review and audited corrections, expiring parent access invites, and parent mobile views limited to linked children. Check-in opens one hour before the session; checkout is available once it starts. Push attendance alerts are implemented for owner/staff mobile devices but require EAS/APNs/FCM configuration. Physical-device workflow checks and broader browser E2E coverage remain before calling it pilot-ready. See [the product roadmap](docs/product-roadmap.md) for acceptance gates and the next phase.
 
-The implementation intentionally keeps the product focused on one configured academy. The initial finance slice supports manual charges, offline receipts, refunds, expenses, and parent read-only statements; online payments are not connected. Admissions supports inquiry intake, follow-up history, source tracking, and conversion into a student with an optional enrollment. Staff accounts have owner-managed API permissions and token-based password recovery when Resend delivery is configured. Coaches can record sport-labeled progress entries and choose parent visibility; academy-defined assessment templates and history corrections remain open. The dashboard shows no fabricated operational metrics. See [the product roadmap](docs/product-roadmap.md) for current acceptance gates and gaps.
+The implementation intentionally keeps the product focused on one configured academy. The initial finance slice supports manual charges, offline receipts, refunds, expenses, and parent read-only statements; online payments are not connected. Admissions supports manual and public website inquiry intake, follow-up history, source tracking, live overview metrics, and conversion into a student with an optional enrollment. Google Forms synchronization is not yet implemented; see [the intake setup and current limits](docs/admissions-intake.md). Staff accounts have owner-managed API permissions and token-based password recovery when Resend delivery is configured. Coaches can record sport-labeled progress entries and choose parent visibility; academy-defined assessment templates and history corrections remain open. The dashboard shows no fabricated operational metrics. See [the product roadmap](docs/product-roadmap.md) for current acceptance gates and gaps.

@@ -34,6 +34,12 @@ function translateError(error: unknown): never {
     if (error.code === "COACH_NOT_FOUND") {
       throw new OperationsError(404, error.code, "The coach was not found in this academy.");
     }
+    if (error.code === "COACH_HAS_ASSIGNMENTS") {
+      throw new OperationsError(409, error.code, "Remove the coach from assigned batches before deleting the account.");
+    }
+    if (error.code === "COACH_HAS_HISTORY") {
+      throw new OperationsError(409, error.code, "This coach has attendance or student progress history. Deactivate the account to preserve academy records.");
+    }
     if (error.code === "COACH_NOT_ASSIGNED") {
       throw new OperationsError(403, error.code, "The coach is not assigned to this session.");
     }
@@ -101,6 +107,9 @@ function translateError(error: unknown): never {
       "A record with those details already exists.",
     );
   }
+  if (typeof error === "object" && error !== null && "code" in error && error.code === "23503") {
+    throw new OperationsError(409, "COACH_HAS_HISTORY", "This coach is linked to academy records. Deactivate the account to preserve history.");
+  }
   if (typeof error === "object" && error !== null && "code" in error && error.code === "23514") {
     throw new OperationsError(
       400,
@@ -158,6 +167,13 @@ export function createOperationsService(
           passwordHash,
           specializations: input.specializations,
           ...(input.phone ? { phone: input.phone } : {}),
+          ...(input.dateOfBirth ? { dateOfBirth: input.dateOfBirth } : {}),
+          ...(input.address ? { address: input.address } : {}),
+          ...(input.emergencyContactName ? { emergencyContactName: input.emergencyContactName } : {}),
+          ...(input.emergencyContactPhone ? { emergencyContactPhone: input.emergencyContactPhone } : {}),
+          qualifications: input.qualifications,
+          ...(input.yearsExperience !== undefined ? { yearsExperience: input.yearsExperience } : {}),
+          ...(input.joinedOn ? { joinedOn: input.joinedOn } : {}),
         });
         return coach;
       } catch (error) {
@@ -167,6 +183,20 @@ export function createOperationsService(
 
     async listCoaches(academyId: string) {
       return repository.listCoaches(academyId);
+    },
+
+    async getCoachDetail(academyId: string, coachId: string) {
+      const detail = await repository.getCoachDetail(academyId, coachId);
+      if (!detail) throw new OperationsError(404, "COACH_NOT_FOUND", "The coach was not found in this academy.");
+      return detail;
+    },
+
+    async deleteCoach(input: { academyId: string; coachId: string }) {
+      try {
+        return await repository.deleteCoach(input);
+      } catch (error) {
+        translateError(error);
+      }
     },
 
     async updateCoach(input: { academyId: string; coachId: string; changes: UpdateCoachRequest }) {
@@ -185,6 +215,14 @@ export function createOperationsService(
     }) {
       try {
         return await repository.assignCoach(input);
+      } catch (error) {
+        translateError(error);
+      }
+    },
+
+    async unassignCoach(input: { academyId: string; batchId: string; coachId: string }) {
+      try {
+        return await repository.unassignCoach(input);
       } catch (error) {
         translateError(error);
       }

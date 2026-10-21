@@ -134,6 +134,12 @@ export function createOperationsRouter(options: {
       .json({ data: { coaches: await options.operations.listCoaches(user.academyId) } });
   });
 
+  router.get("/coaches/:coachId", async (request, response) => {
+    const user = await requirePermission(request, options.auth, "coaches:read");
+    const coachId = z.string().uuid().parse(request.params.coachId);
+    response.status(200).json({ data: await options.operations.getCoachDetail(user.academyId, coachId) });
+  });
+
   router.post("/coaches", async (request, response) => {
     const user = await requirePermission(request, options.auth, "coaches:write");
     const input = CreateCoachRequestSchema.parse(request.body);
@@ -157,6 +163,12 @@ export function createOperationsRouter(options: {
     response.status(200).json({ data: result });
   });
 
+  router.delete("/coaches/:coachId", async (request, response) => {
+    const user = await requirePermission(request, options.auth, "coaches:write");
+    const coachId = z.string().uuid().parse(request.params.coachId);
+    response.status(200).json({ data: await options.operations.deleteCoach({ academyId: user.academyId, coachId }) });
+  });
+
   router.post("/batches/:batchId/coaches", async (request, response) => {
     const user = await requirePermission(request, options.auth, "coaches:write");
     const input = AssignCoachRequestSchema.parse(request.body);
@@ -167,6 +179,15 @@ export function createOperationsRouter(options: {
       createdBy: user.id,
     });
     response.status(201).json({ data: assignment });
+  });
+
+  router.delete("/batches/:batchId/coaches/:coachId", async (request, response) => {
+    const user = await requirePermission(request, options.auth, "coaches:write");
+    response.status(200).json({ data: await options.operations.unassignCoach({
+      academyId: user.academyId,
+      batchId: z.string().uuid().parse(request.params.batchId),
+      coachId: z.string().uuid().parse(request.params.coachId),
+    }) });
   });
 
   router.get("/schedules", async (request, response) => {

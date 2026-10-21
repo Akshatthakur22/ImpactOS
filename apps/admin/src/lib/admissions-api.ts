@@ -1,5 +1,6 @@
 import {
   AddInquiryActivityRequestSchema,
+  AdmissionsOverviewSchema,
   ApiErrorSchema,
   ConvertInquiryRequestSchema,
   ConvertedInquirySchema,
@@ -63,6 +64,10 @@ export function getInquiries(
     if (value !== undefined) params.set(key, String(value));
   }
   return request(`/inquiries?${params.toString()}`, InquiryListSchema, accessToken, refresh);
+}
+
+export function getAdmissionsOverview(accessToken: string, refresh: RefreshSession) {
+  return request("/admissions/overview", AdmissionsOverviewSchema, accessToken, refresh);
 }
 
 export function getInquiry(accessToken: string, refresh: RefreshSession, inquiryId: string) {

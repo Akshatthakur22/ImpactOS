@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import {
+  AddStudentGuardianRequestSchema,
   CreateBatchRequestSchema,
   CreateDisciplineRequestSchema,
   CreateEnrollmentRequestSchema,
@@ -27,7 +28,12 @@ export function createAcademyRouter(options: {
 
   router.get("/academy/settings", async (request, response) => {
     const user = await requireAnyPermission(request, options.auth, [
-      "settings:manage", "schedules:read", "attendance:read", "payments:read", "expenses:manage", "reports:read",
+      "settings:manage",
+      "schedules:read",
+      "attendance:read",
+      "payments:read",
+      "expenses:manage",
+      "reports:read",
     ]);
     response.status(200).json({ data: await options.academy.getSettings(user.academyId) });
   });
@@ -42,7 +48,11 @@ export function createAcademyRouter(options: {
 
   router.get("/academy/catalog", async (request, response) => {
     const user = await requireAnyPermission(request, options.auth, [
-      "students:read", "academy:manage", "coaches:read", "schedules:read", "announcements:manage",
+      "students:read",
+      "academy:manage",
+      "coaches:read",
+      "schedules:read",
+      "announcements:manage",
     ]);
     response.status(200).json({ data: await options.academy.getCatalog(user.academyId) });
   });
@@ -122,6 +132,14 @@ export function createAcademyRouter(options: {
     response.status(200).json({ data: await options.academy.listStudents(user.academyId, query) });
   });
 
+  router.get("/students/:studentId", async (request, response) => {
+    const user = await requirePermission(request, options.auth, "students:read");
+    const studentId = z.string().uuid().parse(request.params.studentId);
+    response.status(200).json({
+      data: await options.academy.getStudent(user.academyId, studentId),
+    });
+  });
+
   router.post("/students", async (request, response) => {
     const user = await requirePermission(request, options.auth, "students:write");
     const input = CreateStudentRequestSchema.parse(request.body);
@@ -156,6 +174,27 @@ export function createAcademyRouter(options: {
       changes,
     });
     response.status(200).json({ data: result });
+  });
+
+  router.delete("/students/:studentId", async (request, response) => {
+    const user = await requirePermission(request, options.auth, "students:write");
+    const studentId = z.string().uuid().parse(request.params.studentId);
+    response.status(200).json({
+      data: await options.academy.deleteStudent({ academyId: user.academyId, studentId }),
+    });
+  });
+
+  router.post("/students/:studentId/guardians", async (request, response) => {
+    const user = await requirePermission(request, options.auth, "students:write");
+    const studentId = z.string().uuid().parse(request.params.studentId);
+    const input = AddStudentGuardianRequestSchema.parse(request.body);
+    const record = await options.academy.addStudentGuardian({
+      ...input,
+      academyId: user.academyId,
+      createdBy: user.id,
+      studentId,
+    });
+    response.status(201).json({ data: record });
   });
 
   router.patch("/students/:studentId/guardians/:guardianId", async (request, response) => {

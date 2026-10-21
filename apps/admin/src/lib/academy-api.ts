@@ -1,4 +1,5 @@
 import {
+  AddStudentGuardianRequestSchema,
   AcademyCatalogSchema,
   ApiErrorSchema,
   CreateBatchRequestSchema,
@@ -6,6 +7,7 @@ import {
   CreateProgramRequestSchema,
   CreateStudentRequestSchema,
   CreatedRecordSchema,
+  DeletedRecordSchema,
   StudentDirectoryQuerySchema,
   StudentListSchema,
   StudentSchema,
@@ -17,11 +19,13 @@ import {
   UpdateStudentRequestSchema,
   UpdatedRecordSchema,
   type AcademyCatalog,
+  type AddStudentGuardianRequest,
   type CreateBatchRequest,
   type CreateDisciplineRequest,
   type CreateProgramRequest,
   type CreateStudentRequest,
   type StudentDirectoryQuery,
+  type StudentList,
   type Student,
   type UpdateEnrollmentStatusRequest,
   type UpdateBatchRequest,
@@ -97,12 +101,25 @@ export async function getStudents(
   });
   if (parsed.search) params.set("search", parsed.search);
   if (parsed.status) params.set("status", parsed.status);
-  return requestData<{
-    students: Student[];
-    total?: number;
-    offset?: number;
-    limit?: number;
-  }>(`/students?${params.toString()}`, StudentListSchema, accessToken, refresh);
+  return requestData<StudentList>(
+    `/students?${params.toString()}`,
+    StudentListSchema,
+    accessToken,
+    refresh,
+  );
+}
+
+export async function getStudent(
+  accessToken: string,
+  refresh: RefreshSession,
+  studentId: string,
+) {
+  return requestData<Student>(
+    `/students/${studentId}`,
+    StudentSchema,
+    accessToken,
+    refresh,
+  );
 }
 
 export async function createDiscipline(
@@ -193,6 +210,16 @@ export async function updateStudent(
   });
 }
 
+export async function deleteStudent(
+  accessToken: string,
+  refresh: RefreshSession,
+  studentId: string,
+) {
+  return requestData(`/students/${studentId}`, DeletedRecordSchema, accessToken, refresh, {
+    method: "DELETE",
+  });
+}
+
 export async function updateStudentGuardian(
   accessToken: string,
   refresh: RefreshSession,
@@ -207,6 +234,22 @@ export async function updateStudentGuardian(
     accessToken,
     refresh,
     { method: "PATCH", body: JSON.stringify(value) },
+  );
+}
+
+export async function addStudentGuardian(
+  accessToken: string,
+  refresh: RefreshSession,
+  studentId: string,
+  input: AddStudentGuardianRequest,
+) {
+  const value = AddStudentGuardianRequestSchema.parse(input);
+  return requestData(
+    `/students/${studentId}/guardians`,
+    CreatedRecordSchema,
+    accessToken,
+    refresh,
+    jsonBody(value),
   );
 }
 

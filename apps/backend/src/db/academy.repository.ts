@@ -1,6 +1,7 @@
 import { and, asc, count, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import type {
   CreateStudentRequest,
+  AddStudentGuardianRequest,
   StudentDirectoryQuery,
   UpdateEnrollmentStatusRequest,
   UpdateBatchRequest,
@@ -33,7 +34,8 @@ export class AcademyRepositoryError extends Error {
       | "ENROLLMENT_ALREADY_ENDED"
       | "GUARDIAN_ACCOUNT_EMAIL_LOCKED"
       | "ACTIVE_CHILD_RECORDS"
-      | "CAPACITY_BELOW_ENROLLMENT",
+      | "CAPACITY_BELOW_ENROLLMENT"
+      | "STUDENT_HAS_HISTORY",
   ) {
     super(code);
     this.name = "AcademyRepositoryError";
@@ -450,12 +452,29 @@ export function createAcademyRepository(db: Database) {
       }
       const where = and(...filters)!;
       const [totalRow] = await db.select({ total: count() }).from(students).where(where);
+      const [summaryRow] = await db
+        .select({
+          total: count(),
+          active: sql<number>`count(*) filter (where ${students.status} = 'active')::int`,
+          pending: sql<number>`count(*) filter (where ${students.status} = 'pending')::int`,
+          leads: sql<number>`count(*) filter (where ${students.status} = 'lead')::int`,
+          missingEmergencyContact: sql<number>`count(*) filter (where ${students.emergencyContactPhone} is null or ${students.emergencyContactName} is null or ${students.emergencyContactRelationship} is null)::int`,
+        })
+        .from(students)
+        .where(eq(students.academyId, academyId));
       const studentRows = await db
         .select({
           id: students.id,
           firstName: students.firstName,
           lastName: students.lastName,
           status: students.status,
+          dateOfBirth: students.dateOfBirth,
+          gender: students.gender,
+          address: students.address,
+          medicalNotes: students.medicalNotes,
+          emergencyContactName: students.emergencyContactName,
+          emergencyContactRelationship: students.emergencyContactRelationship,
+          emergencyContactPhone: students.emergencyContactPhone,
           createdAt: students.createdAt,
         })
         .from(students)
@@ -466,7 +485,13 @@ export function createAcademyRepository(db: Database) {
 
       const total = totalRow?.total ?? 0;
       if (studentRows.length === 0) {
-        return { students: [], total, offset: query.offset, limit: query.limit };
+        return {
+          students: [],
+          total,
+          offset: query.offset,
+          limit: query.limit,
+          summary: summaryRow,
+        };
       }
       const studentIds = studentRows.map((student) => student.id);
       const [guardianRows, enrollmentRows] = await Promise.all([
@@ -584,7 +609,13 @@ export function createAcademyRepository(db: Database) {
           }),
         ),
       }));
-      return { students: mappedStudents, total, offset: query.offset, limit: query.limit };
+      return {
+        students: mappedStudents,
+        total,
+        offset: query.offset,
+        limit: query.limit,
+        summary: summaryRow,
+      };
     },
 
     async updateStudent(input: {
@@ -713,6 +744,39 @@ export function createAcademyRepository(db: Database) {
       });
     },
 
+    async addStudentGuardian(
+      input: CreateRecordContext & AddStudentGuardianRequest & { studentId: string },
+    ) {
+      return db.transaction(async (tx) => {
+        const [student] = await tx
+          .select({ id: students.id })
+          .from(students)
+          .where(and(eq(students.id, input.studentId), eq(students.academyId, input.academyId)))
+          .for("update")
+          .limit(1);
+        if (!student) throw new AcademyRepositoryError("RELATED_RECORD_NOT_FOUND");
+        const [guardian] = await tx
+          .insert(guardians)
+          .values({
+            academyId: input.academyId,
+            name: input.name,
+            ...(input.email ? { email: input.email } : {}),
+            ...(input.phone ? { phone: input.phone } : {}),
+            createdBy: input.createdBy,
+          })
+          .returning({ id: guardians.id });
+        if (!guardian) throw new Error("Guardian insert returned no record.");
+        await tx.insert(studentGuardians).values({
+          academyId: input.academyId,
+          studentId: input.studentId,
+          guardianId: guardian.id,
+          relationship: input.relationship,
+          isPrimary: false,
+        });
+        return { id: guardian.id };
+      });
+    },
+
     async endEnrollment(input: {
       academyId: string;
       studentId: string;
@@ -781,6 +845,13 @@ export function createAcademyRepository(db: Database) {
             firstName: input.firstName,
             lastName: input.lastName,
             status: input.status,
+            dateOfBirth: input.dateOfBirth ?? null,
+            gender: input.gender ?? null,
+            address: input.address ?? null,
+            medicalNotes: input.medicalNotes ?? null,
+            emergencyContactName: input.emergencyContact?.name ?? null,
+            emergencyContactRelationship: input.emergencyContact?.relationship ?? null,
+            emergencyContactPhone: input.emergencyContact?.phone ?? null,
             createdBy: input.createdBy,
           })
           .returning({ id: students.id });
@@ -823,6 +894,24 @@ export function createAcademyRepository(db: Database) {
       } = await this.listStudents(input.academyId, { offset: 0, limit: 1 }, studentId);
       if (!student) throw new Error("Created student could not be loaded.");
       return student;
+    },
+
+    async deleteStudent(input: { academyId: string; studentId: string }) {
+      try {
+        const [deleted] = await db
+          .delete(students)
+          .where(and(eq(students.id, input.studentId), eq(students.academyId, input.academyId)))
+          .returning({ id: students.id });
+        if (!deleted) throw new AcademyRepositoryError("RELATED_RECORD_NOT_FOUND");
+        return { deleted: true };
+      } catch (error) {
+        const code =
+          typeof error === "object" && error !== null && "code" in error
+            ? (error as { code?: unknown }).code
+            : undefined;
+        if (code === "23503") throw new AcademyRepositoryError("STUDENT_HAS_HISTORY");
+        throw error;
+      }
     },
 
     async createEnrollment(input: CreateRecordContext & { studentId: string; batchId: string }) {

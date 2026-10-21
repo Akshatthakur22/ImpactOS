@@ -120,6 +120,27 @@
       "when": 1792427171923,
       "tag": "0016_abandoned_scarlet_witch",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792490000000,
+      "tag": "0017_admissions_intake",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1792511367569,
+      "tag": "0018_student_profiles",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792517300480,
+      "tag": "0019_coach_profile_details",
+      "breakpoints": true
     }
   ]
 }

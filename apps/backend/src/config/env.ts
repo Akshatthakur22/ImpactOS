@@ -15,6 +15,8 @@ const EnvironmentSchema = z.object({
   ACCESS_TOKEN_TTL_MINUTES: z.coerce.number().int().min(5).max(60).default(15),
   RESEND_API_KEY: z.string().min(1).optional(),
   EMAIL_FROM: z.string().email().optional(),
+  PUBLIC_ADMISSIONS_ACADEMY_ID: z.string().uuid().optional(),
+  PUBLIC_ADMISSIONS_WEB_ORIGIN: z.string().url().optional(),
 });
 
 export type AppEnv = z.infer<typeof EnvironmentSchema>;

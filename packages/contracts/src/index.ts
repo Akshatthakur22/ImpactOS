@@ -321,6 +321,13 @@ export const StudentSchema = z.object({
   firstName: z.string().min(1),
   lastName: z.string().min(1),
   status: StudentStatusSchema,
+  dateOfBirth: z.string().date().nullable().optional(),
+  gender: z.string().nullable().optional(),
+  address: z.string().nullable().optional(),
+  medicalNotes: z.string().nullable().optional(),
+  emergencyContactName: z.string().nullable().optional(),
+  emergencyContactRelationship: z.string().nullable().optional(),
+  emergencyContactPhone: z.string().nullable().optional(),
   createdAt: z.string().datetime(),
   guardians: z.array(
     z.object({
@@ -393,6 +400,7 @@ export const InquirySchema = z.object({
   programId: z.string().uuid().nullable(),
   programName: z.string().nullable(),
   status: InquiryStatusSchema,
+  needsReview: z.boolean().default(false),
   notes: z.string().nullable(),
   nextFollowUpAt: z.string().datetime().nullable(),
   convertedStudentId: z.string().uuid().nullable(),
@@ -422,6 +430,46 @@ export const CreateInquiryRequestSchema = z
     path: ["contactPhone"],
   });
 export type CreateInquiryRequest = z.infer<typeof CreateInquiryRequestSchema>;
+
+export const PublicInquiryRequestSchema = z
+  .object({
+    studentFirstName: InquiryNameSchema,
+    studentLastName: InquiryNameSchema,
+    contactName: z.string().trim().min(1).max(120),
+    contactEmail: z.string().trim().email().max(254).toLowerCase().optional(),
+    contactPhone: z.string().trim().min(7).max(30).optional(),
+    relationship: z.string().trim().min(1).max(40).optional(),
+    programId: z.string().uuid().optional(),
+    notes: z.string().trim().max(4000).optional(),
+    consent: z.literal(true),
+    website: z.string().max(0).optional(),
+  })
+  .refine((value) => value.contactEmail || value.contactPhone, {
+    message: "Add an email address or phone number so the contact can be reached.",
+    path: ["contactPhone"],
+  });
+export type PublicInquiryRequest = z.infer<typeof PublicInquiryRequestSchema>;
+
+export const PublicInquiryConfirmationSchema = z.object({ received: z.literal(true) });
+export type PublicInquiryConfirmation = z.infer<typeof PublicInquiryConfirmationSchema>;
+
+export const AdmissionsOverviewSchema = z.object({
+  createdInRange: z.number().int().nonnegative(),
+  awaitingFirstContact: z.number().int().nonnegative(),
+  dueToday: z.number().int().nonnegative(),
+  overdue: z.number().int().nonnegative(),
+  active: z.number().int().nonnegative(),
+  convertedInRange: z.number().int().nonnegative(),
+  conversionRate: z.number().min(0).max(100),
+  bySource: z.array(
+    z.object({
+      source: z.string(),
+      inquiries: z.number().int().nonnegative(),
+      converted: z.number().int().nonnegative(),
+    }),
+  ),
+});
+export type AdmissionsOverview = z.infer<typeof AdmissionsOverviewSchema>;
 
 export const InquiryListQuerySchema = z.object({
   search: z.string().trim().max(120).optional(),
@@ -509,6 +557,17 @@ export const CreateStudentRequestSchema = z.object({
   firstName: z.string().trim().min(1).max(80),
   lastName: z.string().trim().min(1).max(80),
   status: StudentStatusSchema.default("pending"),
+  dateOfBirth: z.string().date().nullable().optional(),
+  gender: z.string().trim().max(40).nullable().optional(),
+  address: z.string().trim().max(500).nullable().optional(),
+  medicalNotes: z.string().trim().max(2000).nullable().optional(),
+  emergencyContact: z
+    .object({
+      name: z.string().trim().min(1).max(120),
+      relationship: z.string().trim().min(1).max(40),
+      phone: z.string().trim().min(7).max(30),
+    })
+    .optional(),
   guardian: z
     .object({
       name: z.string().trim().min(1).max(120),
@@ -537,6 +596,15 @@ export const StudentListSchema = z
     total: z.number().int().nonnegative().optional(),
     offset: z.number().int().nonnegative().optional(),
     limit: z.number().int().positive().optional(),
+    summary: z
+      .object({
+        total: z.number().int().nonnegative(),
+        active: z.number().int().nonnegative(),
+        pending: z.number().int().nonnegative(),
+        leads: z.number().int().nonnegative(),
+        missingEmergencyContact: z.number().int().nonnegative(),
+      })
+      .optional(),
   })
   .transform((value) => ({
     ...value,
@@ -551,6 +619,27 @@ export const UpdateStudentRequestSchema = z
     firstName: z.string().trim().min(1).max(80).optional(),
     lastName: z.string().trim().min(1).max(80).optional(),
     status: StudentStatusSchema.optional(),
+    dateOfBirth: z.string().date().nullable().optional(),
+    gender: z.string().trim().max(40).nullable().optional(),
+    address: z.string().trim().max(500).nullable().optional(),
+    medicalNotes: z.string().trim().max(2000).nullable().optional(),
+    emergencyContactName: z.string().trim().min(1).max(120).nullable().optional(),
+    emergencyContactRelationship: z.string().trim().min(1).max(40).nullable().optional(),
+    emergencyContactPhone: z.string().trim().min(7).max(30).nullable().optional(),
+  })
+  .superRefine((value, context) => {
+    const emergencyFields = [
+      value.emergencyContactName,
+      value.emergencyContactRelationship,
+      value.emergencyContactPhone,
+    ];
+    if (emergencyFields.some((field) => field != null) && emergencyFields.some((field) => !field)) {
+      context.addIssue({
+        code: "custom",
+        path: ["emergencyContactPhone"],
+        message: "Add the emergency contact name, relationship, and phone together.",
+      });
+    }
   })
   .refine((value) => Object.keys(value).length > 0, "At least one field is required.");
 export type UpdateStudentRequest = z.infer<typeof UpdateStudentRequestSchema>;
@@ -564,6 +653,14 @@ export const UpdateStudentGuardianRequestSchema = z
   })
   .refine((value) => Object.keys(value).length > 0, "At least one field is required.");
 export type UpdateStudentGuardianRequest = z.infer<typeof UpdateStudentGuardianRequestSchema>;
+
+export const AddStudentGuardianRequestSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  relationship: z.string().trim().min(1).max(40),
+  email: z.string().trim().email().max(254).toLowerCase().optional(),
+  phone: z.string().trim().min(7).max(30).optional(),
+});
+export type AddStudentGuardianRequest = z.infer<typeof AddStudentGuardianRequestSchema>;
 
 export const UpdateEnrollmentStatusRequestSchema = z.object({
   status: z.enum(["active", "completed", "suspended", "withdrawn"]),
@@ -581,6 +678,7 @@ export type StudentDirectoryQuery = z.infer<typeof StudentDirectoryQuerySchema>;
 export const CreatedRecordSchema = z.object({ id: z.string().uuid() });
 export type CreatedRecord = z.infer<typeof CreatedRecordSchema>;
 export const UpdatedRecordSchema = z.object({ updated: z.boolean() });
+export const DeletedRecordSchema = z.object({ deleted: z.boolean() });
 
 const IanaTimezoneSchema = z
   .string()
@@ -688,6 +786,13 @@ export const CoachSchema = z.object({
   displayName: z.string().min(1),
   email: z.string().email(),
   phone: z.string().nullable(),
+  dateOfBirth: z.string().date().nullable(),
+  address: z.string().nullable(),
+  emergencyContactName: z.string().nullable(),
+  emergencyContactPhone: z.string().nullable(),
+  qualifications: z.array(z.string()),
+  yearsExperience: z.number().int().nonnegative().nullable(),
+  joinedOn: z.string().date().nullable(),
   specializations: z.array(z.string()),
   status: CoachStatusSchema,
   batchIds: z.array(z.string().uuid()),
@@ -699,6 +804,13 @@ export const CreateCoachRequestSchema = z.object({
   email: z.string().trim().email().max(254).toLowerCase(),
   password: z.string().min(14).max(256),
   phone: z.string().trim().min(7).max(30).optional(),
+  dateOfBirth: z.string().date().optional(),
+  address: z.string().trim().max(500).optional(),
+  emergencyContactName: z.string().trim().min(1).max(120).optional(),
+  emergencyContactPhone: z.string().trim().min(7).max(30).optional(),
+  qualifications: z.array(z.string().trim().min(1).max(120)).max(20).default([]),
+  yearsExperience: z.number().int().min(0).max(60).nullable().optional(),
+  joinedOn: z.string().date().optional(),
   specializations: z.array(z.string().trim().min(1).max(80)).max(12).default([]),
 });
 export type CreateCoachRequest = z.infer<typeof CreateCoachRequestSchema>;
@@ -706,12 +818,64 @@ export type CreateCoachRequest = z.infer<typeof CreateCoachRequestSchema>;
 export const UpdateCoachRequestSchema = z
   .object({
     displayName: z.string().trim().min(1).max(160).optional(),
+    email: z.string().trim().email().max(254).toLowerCase().optional(),
     phone: z.string().trim().min(7).max(30).nullable().optional(),
+    dateOfBirth: z.string().date().nullable().optional(),
+    address: z.string().trim().max(500).nullable().optional(),
+    emergencyContactName: z.string().trim().min(1).max(120).nullable().optional(),
+    emergencyContactPhone: z.string().trim().min(7).max(30).nullable().optional(),
+    qualifications: z.array(z.string().trim().min(1).max(120)).max(20).optional(),
+    yearsExperience: z.number().int().min(0).max(60).nullable().optional(),
+    joinedOn: z.string().date().nullable().optional(),
     specializations: z.array(z.string().trim().min(1).max(80)).max(12).optional(),
     status: CoachStatusSchema.optional(),
   })
   .refine((value) => Object.keys(value).length > 0, "At least one field is required.");
 export type UpdateCoachRequest = z.infer<typeof UpdateCoachRequestSchema>;
+
+export const CoachProfileDetailSchema = z.object({
+  coach: CoachSchema,
+  assignedBatches: z.array(z.object({
+    id: z.string().uuid(),
+    name: z.string().min(1),
+    programName: z.string().min(1),
+    disciplineName: z.string().min(1),
+  })),
+  schedules: z.array(z.object({
+    id: z.string().uuid(),
+    batchId: z.string().uuid(),
+    batchName: z.string().min(1),
+    branchName: z.string().nullable(),
+    dayOfWeek: z.number().int().min(0).max(6),
+    startTime: z.string(),
+    endTime: z.string(),
+  })),
+  stats: z.object({
+    classesCheckedIn: z.number().int().nonnegative(),
+    attendanceMarks: z.number().int().nonnegative(),
+    progressEntries: z.number().int().nonnegative(),
+  }),
+  recentSessions: z.array(z.object({
+    id: z.string().uuid(),
+    batchName: z.string().min(1),
+    startsAt: z.string().datetime(),
+    endsAt: z.string().datetime(),
+    status: z.enum(["scheduled", "completed", "cancelled"]),
+    checkedInAt: z.string().datetime(),
+    checkedOutAt: z.string().datetime().nullable(),
+  })),
+  recentProgress: z.array(z.object({
+    id: z.string().uuid(),
+    studentName: z.string().min(1),
+    batchName: z.string().min(1),
+    assessmentName: z.string().min(1),
+    value: z.string().nullable(),
+    coachNote: z.string().nullable(),
+    parentVisible: z.boolean(),
+    createdAt: z.string().datetime(),
+  })),
+});
+export type CoachProfileDetail = z.infer<typeof CoachProfileDetailSchema>;
 
 export const FeePaymentMethodSchema = z.enum(["cash", "upi", "bank_transfer"]);
 export type FeePaymentMethod = z.infer<typeof FeePaymentMethodSchema>;
@@ -947,16 +1111,18 @@ export const AcademyBranchSchema = z.object({
 export type AcademyBranch = z.infer<typeof AcademyBranchSchema>;
 export const AcademyBranchListSchema = z.object({ branches: z.array(AcademyBranchSchema) });
 
-export const CreateAcademyBranchRequestSchema = z.object({
-  name: z.string().trim().min(1).max(120),
-  address: z.string().trim().max(500).nullable().optional(),
-  geofenceLatitude: z.number().min(-90).max(90).nullable().optional(),
-  geofenceLongitude: z.number().min(-180).max(180).nullable().optional(),
-  geofenceRadiusMeters: z.number().int().min(25).max(1000).optional(),
-}).refine(
-  (value) => (value.geofenceLatitude == null) === (value.geofenceLongitude == null),
-  { message: "Set both location coordinates, or leave both blank.", path: ["geofenceLongitude"] },
-);
+export const CreateAcademyBranchRequestSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120),
+    address: z.string().trim().max(500).nullable().optional(),
+    geofenceLatitude: z.number().min(-90).max(90).nullable().optional(),
+    geofenceLongitude: z.number().min(-180).max(180).nullable().optional(),
+    geofenceRadiusMeters: z.number().int().min(25).max(1000).optional(),
+  })
+  .refine((value) => (value.geofenceLatitude == null) === (value.geofenceLongitude == null), {
+    message: "Set both location coordinates, or leave both blank.",
+    path: ["geofenceLongitude"],
+  });
 export type CreateAcademyBranchRequest = z.infer<typeof CreateAcademyBranchRequestSchema>;
 
 export const UpdateAcademyBranchRequestSchema = z
@@ -970,7 +1136,7 @@ export const UpdateAcademyBranchRequestSchema = z
   })
   .refine(
     (value) =>
-      !(("geofenceLatitude" in value) !== ("geofenceLongitude" in value)) &&
+      !("geofenceLatitude" in value !== "geofenceLongitude" in value) &&
       (value.geofenceLatitude == null) === (value.geofenceLongitude == null),
     { message: "Set both location coordinates, or clear both.", path: ["geofenceLongitude"] },
   )

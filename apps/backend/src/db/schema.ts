@@ -357,6 +357,13 @@ export const students = pgTable(
       .references(() => academies.id, { onDelete: "restrict" }),
     firstName: varchar("first_name", { length: 80 }).notNull(),
     lastName: varchar("last_name", { length: 80 }).notNull(),
+    dateOfBirth: date("date_of_birth"),
+    gender: varchar("gender", { length: 40 }),
+    address: varchar("address", { length: 500 }),
+    medicalNotes: varchar("medical_notes", { length: 2000 }),
+    emergencyContactName: varchar("emergency_contact_name", { length: 120 }),
+    emergencyContactRelationship: varchar("emergency_contact_relationship", { length: 40 }),
+    emergencyContactPhone: varchar("emergency_contact_phone", { length: 30 }),
     status: studentStatus("status").notNull().default("pending"),
     createdBy: uuid("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
@@ -395,6 +402,7 @@ export const inquiries = pgTable(
     sourceDetail: varchar("source_detail", { length: 240 }),
     programId: uuid("program_id"),
     status: inquiryStatus("status").notNull().default("new"),
+    needsReview: boolean("needs_review").notNull().default(false),
     notes: text("notes"),
     nextFollowUpAt: timestamp("next_follow_up_at", { withTimezone: true, mode: "date" }),
     convertedStudentId: uuid("converted_student_id"),
@@ -466,6 +474,36 @@ export const inquiryActivities = pgTable(
       name: "inquiry_activities_created_by_academy_fk",
       columns: [table.createdBy, table.academyId],
       foreignColumns: [users.id, users.academyId],
+    }).onDelete("restrict"),
+  ],
+);
+
+export const inquirySourceSubmissions = pgTable(
+  "inquiry_source_submissions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    academyId: uuid("academy_id")
+      .notNull()
+      .references(() => academies.id, { onDelete: "restrict" }),
+    source: varchar("source", { length: 40 }).notNull(),
+    externalSubmissionId: varchar("external_submission_id", { length: 240 }).notNull(),
+    inquiryId: uuid("inquiry_id"),
+    status: varchar("status", { length: 16 }).notNull().default("processed"),
+    errorSummary: varchar("error_summary", { length: 500 }),
+    processedAt: timestamp("processed_at", { withTimezone: true, mode: "date" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("inquiry_source_submissions_identity_uq").on(
+      table.academyId,
+      table.source,
+      table.externalSubmissionId,
+    ),
+    index("inquiry_source_submissions_status_idx").on(table.academyId, table.source, table.status),
+    foreignKey({
+      name: "inquiry_source_submissions_inquiry_academy_fk",
+      columns: [table.inquiryId, table.academyId],
+      foreignColumns: [inquiries.id, inquiries.academyId],
     }).onDelete("restrict"),
   ],
 );
@@ -792,6 +830,13 @@ export const coachProfiles = pgTable(
       .references(() => academies.id, { onDelete: "restrict" }),
     userId: uuid("user_id").notNull(),
     phone: varchar("phone", { length: 30 }),
+    dateOfBirth: date("date_of_birth"),
+    address: varchar("address", { length: 500 }),
+    emergencyContactName: varchar("emergency_contact_name", { length: 120 }),
+    emergencyContactPhone: varchar("emergency_contact_phone", { length: 30 }),
+    qualifications: text("qualifications").array().notNull().default(sql`ARRAY[]::text[]`),
+    yearsExperience: integer("years_experience"),
+    joinedOn: date("joined_on"),
     specializations: text("specializations")
       .array()
       .notNull()
