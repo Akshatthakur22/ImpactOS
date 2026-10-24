@@ -171,9 +171,13 @@ function canSeeDestination(
 function Brand({ compact = false }: { compact?: boolean }) {
   return (
     <span className={`flex min-w-0 items-center ${compact ? "justify-center" : "gap-2.5"}`}>
-      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-[#007AFF] to-[#0066D6] text-white shadow-sm shadow-[#007AFF]/25">
+      <span
+        className={`grid place-items-center rounded-xl bg-gradient-to-br from-[#007AFF] to-[#0066D6] text-white shadow-sm shadow-[#007AFF]/25 shrink-0 ${
+          compact ? "h-10 w-10" : "h-8 w-8"
+        }`}
+      >
         <svg
-          className="h-4.5 w-4.5 text-white"
+          className={`${compact ? "h-5 w-5" : "h-4.5 w-4.5"} text-white`}
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -424,7 +428,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
       aria-modal={isMobile ? true : undefined}
       aria-label={isMobile ? "Main navigation" : undefined}
       data-collapsed={collapsed && !isMobile}
-      className={`flex h-full flex-col border-r border-[#E5E5EA] bg-[#F9F9FB] text-[#1D1D1F] transition-all duration-200 ${
+      className={`relative flex h-full flex-col border-r border-[#E5E5EA] bg-[#F9F9FB] text-[#1D1D1F] transition-all duration-200 ${
         isMobile
           ? "w-[min(86vw,290px)] px-3.5 py-4 shadow-xl"
           : collapsed
@@ -432,6 +436,19 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
             : "sticky top-0 h-screen w-[235px] px-3.5 py-4"
       }`}
     >
+      {/* Floating Edge Toggle Button for Desktop */}
+      {!isMobile && (
+        <button
+          type="button"
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          onClick={toggleSidebar}
+          className="absolute -right-3 top-5.5 z-30 flex h-6 w-6 items-center justify-center rounded-full border border-[#E5E5EA] bg-white text-[#8E8E93] shadow-xs hover:bg-[#F5F5F7] hover:text-[#1D1D1F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#007AFF] transition-all"
+        >
+          <Icon name={collapsed ? "chevron-right" : "chevron-left"} size={12} />
+        </button>
+      )}
+
       {/* Brand Header */}
       <div
         className={`flex h-11 items-center ${
@@ -441,7 +458,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
         <Link href="/dashboard" aria-label="SportDesk dashboard">
           <Brand compact={collapsed && !isMobile} />
         </Link>
-        {isMobile ? (
+        {isMobile && (
           <button
             type="button"
             aria-label="Close navigation"
@@ -449,16 +466,6 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
             className="grid h-8 w-8 place-items-center rounded-lg text-[#8E8E93] hover:bg-[#E5E5EA]/70 hover:text-[#1D1D1F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#007AFF]"
           >
             <Icon name="close" size={16} />
-          </button>
-        ) : (
-          <button
-            type="button"
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            onClick={toggleSidebar}
-            className="grid h-7 w-7 place-items-center rounded-lg text-[#8E8E93] hover:bg-[#E5E5EA]/70 hover:text-[#1D1D1F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#007AFF]"
-          >
-            <Icon name={collapsed ? "chevron-right" : "chevron-left"} size={14} />
           </button>
         )}
       </div>
@@ -485,10 +492,10 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
                 const showSubItems = isOperations && operationsExpanded && (!collapsed || isMobile);
 
                 return (
-                  <div key={item.label} className="w-full">
+                  <div key={item.label} className={`w-full ${collapsed && !isMobile ? "flex justify-center" : ""}`}>
                     <div
-                      className={`group flex min-h-[36px] items-center rounded-xl text-[13px] font-medium transition-all ${
-                        collapsed && !isMobile ? "w-10 justify-center px-0" : "px-2.5"
+                      className={`group flex items-center rounded-xl text-[13px] font-medium transition-all ${
+                        collapsed && !isMobile ? "h-10 w-10 justify-center p-0" : "min-h-[36px] px-2.5"
                       } ${
                         isItemActive
                           ? "bg-[#007AFF] text-white font-semibold shadow-sm shadow-[#007AFF]/25"
@@ -515,13 +522,17 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
                         title={collapsed && !isMobile ? item.label : undefined}
                         aria-label={item.label}
                         aria-current={isItemActive ? "page" : undefined}
-                        className="flex flex-1 min-w-0 items-center gap-2.5 py-2 focus-visible:outline-none"
+                        className={`flex min-w-0 items-center focus-visible:outline-none ${
+                          collapsed && !isMobile
+                            ? "h-full w-full justify-center p-0"
+                            : "flex-1 gap-2.5 py-2"
+                        }`}
                       >
                         <Icon
                           name={item.icon}
-                          size={17}
+                          size={18}
                           strokeWidth={isItemActive ? 2.2 : 1.7}
-                          className={isItemActive ? "text-white" : "text-[#8E8E93] group-hover:text-[#1D1D1F]"}
+                          className={`shrink-0 ${isItemActive ? "text-white" : "text-[#8E8E93] group-hover:text-[#1D1D1F]"}`}
                         />
                         {(!collapsed || isMobile) && (
                           <span className="flex-1 truncate">{item.label}</span>
@@ -621,13 +632,15 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
           </div>
         </div>
       ) : (
-        <div className="mt-3 flex flex-col items-center gap-2">
-          <span
-            title={user.academyName}
-            className="grid h-8 w-8 place-items-center rounded-full bg-[#007AFF] text-xs font-bold text-white shadow-xs"
+        <div className="mt-3 flex w-full flex-col items-center justify-center gap-2">
+          <button
+            type="button"
+            title={`${user.academyName} • ${user.role} workspace`}
+            onClick={() => router.push("/dashboard")}
+            className="grid h-10 w-10 place-items-center rounded-xl bg-[#007AFF] text-xs font-bold text-white shadow-xs hover:opacity-90 active:scale-95 transition"
           >
             {user.academyName.slice(0, 1).toUpperCase()}
-          </span>
+          </button>
         </div>
       )}
     </aside>

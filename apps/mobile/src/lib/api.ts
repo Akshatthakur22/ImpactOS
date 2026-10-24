@@ -24,12 +24,14 @@ export function resolveMobileApiBase(options: {
   platform: string;
   webHostname?: string | undefined;
 }) {
+  if (options.isDevelopment && options.platform === "web" && options.webHostname) {
+    return `http://${options.webHostname}:4000/api/v1`;
+  }
+
   const configured = options.configuredUrl?.trim().replace(/\/+$/, "");
   if (configured) return configured;
 
   if (options.isDevelopment) {
-    if (options.platform === "web" && options.webHostname)
-      return `http://${options.webHostname}:4000/api/v1`;
     const devHost = hostFromDevServer(options.developmentHost);
     if (devHost) return `http://${devHost}:4000/api/v1`;
     if (options.platform === "android") return "http://10.0.2.2:4000/api/v1";
