@@ -1,4 +1,7 @@
-import type { ReactNode } from "react";
+"use client";
+
+import { useEffect, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 export function PageHeader({
   eyebrow,
@@ -11,14 +14,30 @@ export function PageHeader({
   description?: ReactNode;
   actions?: ReactNode;
 }) {
-  return (
-    <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
-      <div className="min-w-0">
-        {eyebrow ? <p className="sd-eyebrow mb-1.5">{eyebrow}</p> : null}
-        <h1 className="sd-page-title">{title}</h1>
-        {description ? <p className="mt-2 max-w-3xl text-[13px] leading-5 text-[#73807a]">{description}</p> : null}
-      </div>
-      {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
-    </header>
-  );
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    const titleEl = document.getElementById("workspace-header-title");
+    const subEl = document.getElementById("workspace-header-subtitle");
+    if (titleEl && title) {
+      titleEl.textContent = title;
+    }
+    if (subEl) {
+      const subText =
+        typeof description === "string"
+          ? description
+          : typeof eyebrow === "string"
+            ? eyebrow
+            : "";
+      subEl.textContent = subText ? `• ${subText}` : "";
+    }
+  }, [title, description, eyebrow]);
+
+  if (!mounted || !actions) return null;
+
+  const target = document.getElementById("workspace-header-actions");
+  if (!target) return null;
+
+  return createPortal(actions, target);
 }

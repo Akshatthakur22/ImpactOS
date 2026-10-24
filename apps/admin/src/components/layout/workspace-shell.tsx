@@ -5,8 +5,17 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Icon, type IconName } from "@/components/ui/icon";
+import { NotificationPopover } from "@/components/layout/notification-popover";
 import { useAuth } from "@/hooks/use-auth";
 import type { Permission } from "@sportdesk/contracts";
+
+type SubDestination = {
+  href: string;
+  label: string;
+  section: string;
+  icon: IconName;
+  permissions?: Permission[];
+};
 
 type Destination = {
   href: string;
@@ -16,12 +25,17 @@ type Destination = {
   ownerOnly?: boolean;
   section?: string;
   matches: string[];
+  subItems?: SubDestination[];
 };
-type NavGroup = { label: string; items: Destination[] };
 
-const groups: NavGroup[] = [
+type NavigationGroup = {
+  group: string;
+  items: Destination[];
+};
+
+const navigationGroups: NavigationGroup[] = [
   {
-    label: "Overview",
+    group: "Core",
     items: [
       {
         href: "/dashboard",
@@ -30,24 +44,68 @@ const groups: NavGroup[] = [
         permissions: ["admin:dashboard:read"],
         matches: ["/dashboard"],
       },
+      {
+        href: "/operations?section=calendar",
+        label: "Operations",
+        icon: "calendar",
+        permissions: ["schedules:read"],
+        matches: ["/operations", "/schedule"],
+        subItems: [
+          {
+            href: "/operations?section=calendar",
+            label: "Calendar",
+            section: "calendar",
+            icon: "calendar",
+            permissions: ["schedules:read"],
+          },
+          {
+            href: "/operations?section=classes",
+            label: "Classes & Batches",
+            section: "classes",
+            icon: "academy",
+            permissions: ["academy:manage", "schedules:read"],
+          },
+          {
+            href: "/operations?section=attendance",
+            label: "Attendance",
+            section: "attendance",
+            icon: "check-circle",
+            permissions: ["attendance:read"],
+          },
+          {
+            href: "/operations?section=facilities",
+            label: "Facilities",
+            section: "facilities",
+            icon: "academy",
+            permissions: ["settings:manage"],
+          },
+          {
+            href: "/operations?section=rules",
+            label: "Schedule Rules",
+            section: "rules",
+            icon: "settings",
+            permissions: ["schedules:write"],
+          },
+          {
+            href: "/operations?section=holidays",
+            label: "Holidays",
+            section: "holidays",
+            icon: "calendar",
+            permissions: ["settings:manage"],
+          },
+        ],
+      },
     ],
   },
   {
-    label: "People",
+    group: "Directory",
     items: [
-      {
-        href: "/admissions",
-        label: "Admissions",
-        icon: "inbox",
-        permissions: ["admissions:manage"],
-        matches: ["/admissions"],
-      },
       {
         href: "/students",
         label: "Students",
         icon: "people",
         permissions: ["students:read"],
-        matches: ["/students"],
+        matches: ["/students", "/admissions"],
       },
       {
         href: "/coaches",
@@ -56,115 +114,38 @@ const groups: NavGroup[] = [
         permissions: ["coaches:read"],
         matches: ["/coaches"],
       },
-      {
-        href: "/staff",
-        label: "Staff access",
-        icon: "shield",
-        ownerOnly: true,
-        matches: ["/staff"],
-      },
     ],
   },
   {
-    label: "Academy",
-    items: [
-      {
-        href: "/operations?section=programs",
-        label: "Programs & batches",
-        icon: "academy",
-        section: "programs",
-        permissions: ["academy:manage", "students:read", "schedules:read"],
-        matches: ["/programs", "/batches"],
-      },
-      {
-        href: "/operations?section=schedule",
-        label: "Schedule",
-        icon: "calendar",
-        section: "schedule",
-        permissions: ["schedules:read"],
-        matches: ["/schedule"],
-      },
-      {
-        href: "/operations?section=attendance",
-        label: "Attendance",
-        icon: "check-circle",
-        section: "attendance",
-        permissions: ["attendance:read"],
-        matches: ["/attendance"],
-      },
-      {
-        href: "/operations?section=branches",
-        label: "Branches",
-        icon: "academy",
-        section: "branches",
-        permissions: ["settings:manage"],
-        matches: [],
-      },
-    ],
-  },
-  {
-    label: "Finance",
+    group: "Management",
     items: [
       {
         href: "/finance?section=fees",
-        label: "Fees & receipts",
+        label: "Finance",
         icon: "wallet",
-        section: "fees",
         permissions: ["payments:read"],
-        matches: ["/fees"],
+        matches: ["/finance", "/fees", "/expenses"],
       },
       {
-        href: "/finance?section=expenses",
-        label: "Expenses",
-        icon: "wallet",
-        section: "expenses",
-        permissions: ["expenses:manage"],
-        matches: ["/expenses"],
-      },
-    ],
-  },
-  {
-    label: "Insights",
-    items: [
-      {
-        href: "/analytics?section=performance",
-        label: "Performance",
-        icon: "chart",
-        section: "performance",
-        permissions: ["reports:read"],
-        matches: ["/performance"],
+        href: "/notices",
+        label: "Communication",
+        icon: "megaphone",
+        permissions: ["announcements:manage"],
+        matches: ["/notices", "/notifications"],
       },
       {
         href: "/analytics?section=reports",
         label: "Reports",
         icon: "chart",
-        section: "reports",
         permissions: ["reports:read"],
-        matches: ["/reports"],
+        matches: ["/analytics", "/reports", "/performance"],
       },
-    ],
-  },
-  {
-    label: "Communication",
-    items: [
-      {
-        href: "/notices",
-        label: "Notices",
-        icon: "megaphone",
-        permissions: ["announcements:manage"],
-        matches: ["/notices", "/notifications"],
-      },
-    ],
-  },
-  {
-    label: "Administration",
-    items: [
       {
         href: "/settings",
-        label: "Academy settings",
+        label: "Settings",
         icon: "settings",
         permissions: ["settings:manage"],
-        matches: ["/settings"],
+        matches: ["/settings", "/staff"],
       },
     ],
   },
@@ -173,7 +154,7 @@ const groups: NavGroup[] = [
 function canSeeDestination(
   role: string | undefined,
   permissions: Permission[] | undefined,
-  item: Destination,
+  item: { permissions?: Permission[]; ownerOnly?: boolean },
 ) {
   if (role === "owner") return true;
   if (item.ownerOnly || !item.permissions) return false;
@@ -182,17 +163,29 @@ function canSeeDestination(
 
 function Brand({ compact = false }: { compact?: boolean }) {
   return (
-    <span className={`flex min-w-0 items-center ${compact ? "justify-center" : "gap-3"}`}>
-      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[14px] bg-[#123e3a] text-[11px] font-bold tracking-wide text-white shadow-sm">
-        SD
+    <span className={`flex min-w-0 items-center ${compact ? "justify-center" : "gap-2.5"}`}>
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-[#007AFF] to-[#0066D6] text-white shadow-sm shadow-[#007AFF]/25">
+        <svg
+          className="h-4.5 w-4.5 text-white"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M12 2L2 7l10 5 10-5-10-5z" />
+          <path d="M2 17l10 5 10-5" />
+          <path d="M2 12l10 5 10-5" />
+        </svg>
       </span>
       {!compact && (
         <span className="min-w-0">
-          <span className="block truncate text-[14px] font-semibold tracking-[-0.02em] text-[#1b292d]">
+          <span className="block truncate text-[14px] font-bold tracking-tight text-[#1D1D1F]">
             SportDesk
           </span>
-          <span className="mt-0.5 block truncate text-[11px] text-[#89938f]">
-            Academy workspace
+          <span className="block truncate text-[10px] font-medium text-[#8E8E93]">
+            Academy Management
           </span>
         </span>
       )}
@@ -210,44 +203,51 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
   const [currentSection, setCurrentSection] = useState<string | null>(null);
   const mobileMenuButton = useRef<HTMLButtonElement>(null);
   const mobileDrawer = useRef<HTMLElement>(null);
+
   const visibleGroups = useMemo(
     () =>
-      groups
+      navigationGroups
         .map((group) => ({
           ...group,
-          items: group.items.filter((item) =>
-            canSeeDestination(user?.role, user?.permissions, item),
-          ),
+          items: group.items
+            .filter((item) => canSeeDestination(user?.role, user?.permissions, item))
+            .map((item) => ({
+              ...item,
+              subItems: item.subItems?.filter((sub) =>
+                canSeeDestination(user?.role, user?.permissions, sub),
+              ),
+            })),
         }))
-        .filter((group) => group.items.length),
+        .filter((group) => group.items.length > 0),
     [user?.permissions, user?.role],
   );
-  const destinations = visibleGroups.flatMap((group) => group.items);
+
+  const allVisibleItems = useMemo(
+    () => visibleGroups.flatMap((group) => group.items),
+    [visibleGroups],
+  );
+
   const activeDestination =
-    destinations.find((item) => item.matches.includes(pathname)) ??
-    destinations.find(
-      (item) =>
-        item.href.split("?")[0] === pathname && (!item.section || item.section === currentSection),
+    allVisibleItems.find((item) =>
+      item.matches.some((m) => pathname === m || pathname.startsWith(m + "/")),
     ) ??
-    destinations.find((item) => item.href.split("?")[0] === pathname);
-  const pageLabel =
-    activeDestination?.section === "programs"
-      ? "Programs & batches"
-      : activeDestination?.section === "schedule"
-        ? "Schedule"
-        : activeDestination?.section === "attendance"
-          ? "Attendance"
-          : activeDestination?.section === "branches"
-            ? "Branches"
-            : activeDestination?.section === "fees"
-              ? "Fees & receipts"
-              : activeDestination?.section === "expenses"
-                ? "Expenses"
-                : activeDestination?.section === "performance"
-                  ? "Performance"
-                  : activeDestination?.section === "reports"
-                    ? "Reports"
-                    : (activeDestination?.label ?? "Workspace");
+    allVisibleItems.find((item) => item.href.split("?")[0] === pathname) ??
+    allVisibleItems[0];
+
+  const pageLabel = useMemo(() => {
+    if (pathname === "/operations") {
+      const sec = currentSection || "calendar";
+      if (sec === "calendar" || sec === "schedule") return "Calendar";
+      if (sec === "classes" || sec === "programs" || sec === "batches") return "Classes & Batches";
+      if (sec === "coaches") return "Coaches";
+      if (sec === "facilities" || sec === "branches") return "Facilities";
+      if (sec === "attendance") return "Attendance";
+      if (sec === "rules") return "Schedule Rules";
+      if (sec === "holidays") return "Holidays";
+      return "Operations";
+    }
+    return activeDestination?.label ?? "Workspace";
+  }, [pathname, currentSection, activeDestination]);
 
   useEffect(() => {
     try {
@@ -387,10 +387,19 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
       aria-modal={isMobile ? true : undefined}
       aria-label={isMobile ? "Main navigation" : undefined}
       data-collapsed={collapsed && !isMobile}
-      className={`flex h-full flex-col border-r border-[#e8ece9] bg-white ${isMobile ? "w-[min(86vw,300px)] px-4 py-5 shadow-2xl" : collapsed ? "sticky top-0 h-screen w-[76px] items-center px-3 py-5" : "sticky top-0 h-screen w-[248px] px-4 py-5"}`}
+      className={`flex h-full flex-col border-r border-[#E5E5EA] bg-[#F9F9FB] text-[#1D1D1F] transition-all duration-200 ${
+        isMobile
+          ? "w-[min(86vw,290px)] px-3.5 py-4 shadow-xl"
+          : collapsed
+            ? "sticky top-0 h-screen w-[70px] items-center px-2.5 py-4"
+            : "sticky top-0 h-screen w-[235px] px-3.5 py-4"
+      }`}
     >
+      {/* Brand Header */}
       <div
-        className={`flex h-12 items-center ${collapsed && !isMobile ? "justify-center" : "justify-between px-1"}`}
+        className={`flex h-11 items-center ${
+          collapsed && !isMobile ? "justify-center" : "justify-between px-1"
+        }`}
       >
         <Link href="/dashboard" aria-label="SportDesk dashboard">
           <Brand compact={collapsed && !isMobile} />
@@ -400,9 +409,9 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
             type="button"
             aria-label="Close navigation"
             onClick={() => setMobileOpen(false)}
-            className="grid h-9 w-9 place-items-center rounded-xl text-[#64716d] hover:bg-[#f4f6f4] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#176e67]"
+            className="grid h-8 w-8 place-items-center rounded-lg text-[#8E8E93] hover:bg-[#E5E5EA]/70 hover:text-[#1D1D1F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#007AFF]"
           >
-            <Icon name="close" />
+            <Icon name="close" size={16} />
           </button>
         ) : (
           <button
@@ -410,66 +419,148 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             onClick={toggleSidebar}
-            className="grid h-8 w-8 place-items-center rounded-lg text-[#77827e] hover:bg-[#f4f6f4] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#176e67]"
+            className="grid h-7 w-7 place-items-center rounded-lg text-[#8E8E93] hover:bg-[#E5E5EA]/70 hover:text-[#1D1D1F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#007AFF]"
           >
-            <Icon name={collapsed ? "chevron-right" : "chevron-left"} size={16} />
+            <Icon name={collapsed ? "chevron-right" : "chevron-left"} size={14} />
           </button>
         )}
       </div>
+
+      {/* Main Navigation List */}
       <nav
         aria-label="Main navigation"
-        className="sd-sidebar-nav mt-8 min-h-0 w-full flex-1 space-y-6 overflow-y-auto pb-4"
+        className="sd-sidebar-nav mt-4 min-h-0 w-full flex-1 space-y-4 overflow-y-auto pr-0.5"
       >
         {visibleGroups.map((group) => (
-          <section key={group.label} aria-label={group.label}>
+          <div key={group.group} className="w-full">
             {(!collapsed || isMobile) && (
-              <h2 className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#929c98]">
-                {group.label}
-              </h2>
+              <p className="px-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-[#8E8E93]">
+                {group.group}
+              </p>
             )}
-            <div className="space-y-1">
+            <div className="space-y-0.5">
               {group.items.map((item) => {
-                const active = item.section
-                  ? item.href.split("?")[0] === pathname &&
-                    item.section ===
-                      (currentSection ??
-                        (pathname === "/operations"
-                          ? "programs"
-                          : pathname === "/analytics"
-                            ? "performance"
-                            : pathname === "/finance"
-                              ? "fees"
-                              : null))
-                  : item.matches.includes(pathname);
+                const isItemActive =
+                  item.matches.some((m) => pathname === m || pathname.startsWith(m + "/")) ||
+                  item.href.split("?")[0] === pathname;
+
+                const isOperations = item.label === "Operations";
+                const showSubItems = isOperations && isItemActive && (!collapsed || isMobile);
+
                 return (
-                  <Link
-                    key={item.label}
-                    href={item.href}
-                    onClick={() =>
-                      window.dispatchEvent(
-                        new CustomEvent("sportdesk:section-change", {
-                          detail: item.section ?? null,
-                        }),
-                      )
-                    }
-                    title={collapsed && !isMobile ? item.label : undefined}
-                    aria-label={item.label}
-                    aria-current={active ? "page" : undefined}
-                    className={`group flex min-h-10 items-center gap-3 rounded-xl px-3 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#176e67] ${collapsed && !isMobile ? "w-11 justify-center px-0" : ""} ${active ? "bg-[#eaf3ef] text-[#176e67]" : "text-[#56645f] hover:bg-[#f5f7f5] hover:text-[#24332e]"}`}
-                  >
-                    <Icon name={item.icon} size={18} strokeWidth={active ? 2 : 1.7} />
-                    {(!collapsed || isMobile) && <span className="truncate">{item.label}</span>}
-                  </Link>
+                  <div key={item.label} className="w-full">
+                    <Link
+                      href={item.href}
+                      onClick={() => {
+                        if (item.subItems && item.subItems.length > 0) {
+                          window.dispatchEvent(
+                            new CustomEvent("sportdesk:section-change", {
+                              detail: currentSection || "calendar",
+                            }),
+                          );
+                        }
+                      }}
+                      title={collapsed && !isMobile ? item.label : undefined}
+                      aria-label={item.label}
+                      aria-current={isItemActive ? "page" : undefined}
+                      className={`group flex min-h-[36px] items-center gap-2.5 rounded-xl px-2.5 text-[13px] font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#007AFF] ${
+                        collapsed && !isMobile ? "w-10 justify-center px-0" : ""
+                      } ${
+                        isItemActive
+                          ? "bg-[#007AFF] text-white font-semibold shadow-sm shadow-[#007AFF]/25"
+                          : "text-[#48484A] hover:bg-[#E5E5EA]/60 hover:text-[#1D1D1F]"
+                      }`}
+                    >
+                      <Icon
+                        name={item.icon}
+                        size={17}
+                        strokeWidth={isItemActive ? 2.2 : 1.7}
+                        className={isItemActive ? "text-white" : "text-[#8E8E93] group-hover:text-[#1D1D1F]"}
+                      />
+                      {(!collapsed || isMobile) && (
+                        <span className="flex-1 truncate">{item.label}</span>
+                      )}
+                      {isOperations && (!collapsed || isMobile) && (
+                        <span className={`text-[10px] ${isItemActive ? "text-white/80" : "text-[#8E8E93]"}`}>
+                          <Icon name="chevron-down" size={12} />
+                        </span>
+                      )}
+                    </Link>
+
+                    {/* Sub-navigation for Operations */}
+                    {showSubItems && item.subItems && (
+                      <div className="mt-1 ml-3.5 space-y-0.5 border-l border-[#E5E5EA] pl-2.5 py-1">
+                        {item.subItems.map((sub) => {
+                          const isSubActive = (currentSection || "calendar") === sub.section;
+
+                          return (
+                            <Link
+                              key={sub.section}
+                              href={sub.href}
+                              onClick={() =>
+                                window.dispatchEvent(
+                                  new CustomEvent("sportdesk:section-change", {
+                                    detail: sub.section,
+                                  }),
+                                )
+                              }
+                              aria-current={isSubActive ? "page" : undefined}
+                              className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition-colors ${
+                                isSubActive
+                                  ? "bg-[#007AFF]/10 text-[#007AFF] font-bold"
+                                  : "text-[#6E6E73] hover:bg-[#E5E5EA]/50 hover:text-[#1D1D1F]"
+                              }`}
+                            >
+                              <Icon
+                                name={sub.icon}
+                                size={14}
+                                className={isSubActive ? "text-[#007AFF]" : "text-[#8E8E93]"}
+                              />
+                              <span className="truncate">{sub.label}</span>
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
-          </section>
+          </div>
         ))}
       </nav>
-      {(!collapsed || isMobile) && (
-        <div className="rounded-2xl bg-[#f5f7f5] p-3.5">
-          <p className="truncate text-xs font-semibold text-[#283630]">{user.academyName}</p>
-          <p className="mt-1 text-[11px] leading-4 text-[#77827e]">Your academy workspace</p>
+
+      {/* Academy & User Bottom Profile Card */}
+      {(!collapsed || isMobile) ? (
+        <div className="mt-3 rounded-2xl border border-[#E5E5EA] bg-white p-3 shadow-xs">
+          <div className="flex items-center gap-2.5">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#007AFF] text-xs font-bold text-white shadow-xs">
+              {user.academyName.slice(0, 1).toUpperCase()}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-semibold text-[#1D1D1F]">{user.academyName}</p>
+              <p className="truncate text-[11px] capitalize text-[#8E8E93]">
+                {user.role} workspace
+              </p>
+            </div>
+            <button
+              type="button"
+              title="Sign out"
+              onClick={() => void logout().then(() => router.replace("/login"))}
+              className="grid h-7 w-7 place-items-center rounded-lg text-[#8E8E93] hover:bg-[#FF3B30]/10 hover:text-[#FF3B30]"
+            >
+              <Icon name="arrow-right" size={14} />
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3 flex flex-col items-center gap-2">
+          <span
+            title={user.academyName}
+            className="grid h-8 w-8 place-items-center rounded-full bg-[#007AFF] text-xs font-bold text-white shadow-xs"
+          >
+            {user.academyName.slice(0, 1).toUpperCase()}
+          </span>
         </div>
       )}
     </aside>
@@ -477,7 +568,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
 
   return (
     <div
-      className={`${compactStudentsPage ? "students-fixed-shell" : "min-h-screen"} bg-[#f6f7f5] text-[#1b292d] lg:flex`}
+      className={`${compactStudentsPage ? "students-fixed-shell" : "min-h-screen"} bg-white text-[#1D1D1F] lg:flex`}
     >
       <div className="hidden shrink-0 lg:block">{sidebar()}</div>
       {mobileOpen && (
@@ -486,67 +577,72 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
             type="button"
             aria-label="Close navigation overlay"
             onClick={() => setMobileOpen(false)}
-            className="absolute inset-0 cursor-default bg-[#15211d]/35 backdrop-blur-[2px]"
+            className="absolute inset-0 cursor-default bg-black/40 backdrop-blur-[3px]"
           />
           <div className="absolute inset-y-0 left-0">{sidebar(true)}</div>
         </div>
       )}
       <div
-        className={`${compactStudentsPage ? "h-full min-h-0" : "min-h-screen"} flex min-w-0 flex-1 flex-col`}
+        className={`${compactStudentsPage ? "h-full min-h-0" : "min-h-screen"} flex min-w-0 flex-1 flex-col bg-white`}
       >
-        <header className="sticky top-0 z-30 shrink-0 border-b border-[#e8ece9] bg-white/95 px-4 backdrop-blur-md sm:px-7">
-          <div className="flex min-h-[68px] items-center gap-3">
-            <button
-              ref={mobileMenuButton}
-              type="button"
-              aria-label="Open navigation"
-              aria-expanded={mobileOpen}
-              aria-controls="mobile-navigation"
-              onClick={() => setMobileOpen(true)}
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#56645f] hover:bg-[#f4f6f4] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#176e67] lg:hidden"
-            >
-              <Icon name="menu" />
-            </button>
-            <div className="min-w-0 flex-1">
-              <div className="hidden items-center gap-2 text-[11px] text-[#8a9591] sm:flex">
-                <span>{user.academyName}</span>
-                <span aria-hidden="true">/</span>
-                <span className="text-[#54625d]">
-                  {user.role === "owner" ? "Owner workspace" : "Staff workspace"}
-                </span>
-              </div>
-              <div className="truncate text-[15px] font-semibold tracking-[-0.015em] sm:mt-0.5">
-                {pageLabel}
+        <header className="sticky top-0 z-30 shrink-0 border-b border-[#E5E5EA] bg-white/95 px-4 backdrop-blur-md sm:px-7">
+          <div className="flex min-h-[60px] items-center justify-between gap-3">
+            {/* Left: Mobile trigger & Page Context */}
+            <div className="flex items-center gap-3 min-w-0">
+              <button
+                ref={mobileMenuButton}
+                type="button"
+                aria-label="Open navigation"
+                aria-expanded={mobileOpen}
+                aria-controls="mobile-navigation"
+                onClick={() => setMobileOpen(true)}
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-xl text-[#6E6E73] hover:bg-[#F5F5F7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#007AFF] lg:hidden"
+              >
+                <Icon name="menu" />
+              </button>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <h1 id="workspace-header-title" className="truncate text-[16px] font-bold tracking-tight text-[#1D1D1F] sm:text-[17px]">
+                    {pathname === "/dashboard" ? `Welcome back, ${user.displayName.split(" ")[0]}` : pageLabel}
+                  </h1>
+                  <span id="workspace-header-subtitle" className="hidden truncate text-xs text-[#8E8E93] md:inline-block">
+                    • {new Intl.DateTimeFormat("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" }).format(new Date())}
+                  </span>
+                </div>
               </div>
             </div>
-            <div className="flex items-center gap-2 sm:gap-3">
-              <span className="hidden text-right sm:block">
-                <span className="block max-w-40 truncate text-xs font-semibold">
-                  {user.displayName}
-                </span>
-                <span className="mt-0.5 block text-[11px] capitalize text-[#8a9591]">
-                  {user.role}
-                </span>
-              </span>
+
+            {/* Right: Merged Page Actions, Notifications & Profile */}
+            <div className="flex items-center gap-2.5 sm:gap-3">
+              {/* Target for portaled page action buttons */}
+              <div id="workspace-header-actions" className="flex items-center gap-2" />
+
+              {/* Dynamic Notification & Notice Popover */}
+              <NotificationPopover />
+
+              {/* Account Dropdown */}
               <details className="relative">
                 <summary
                   aria-label="Account menu"
-                  className="flex cursor-pointer list-none items-center gap-2 rounded-xl p-1.5 hover:bg-[#f4f6f4] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#176e67]"
+                  className="flex cursor-pointer list-none items-center gap-1 rounded-xl p-0.5 hover:bg-[#F5F5F7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#007AFF]"
                 >
-                  <span className="grid h-9 w-9 place-items-center rounded-full bg-[#e1eee9] text-sm font-semibold text-[#176e67]">
+                  <span className="grid h-8 w-8 place-items-center rounded-full bg-[#007AFF] text-xs font-bold text-white shadow-xs">
                     {user.displayName.slice(0, 1).toUpperCase()}
                   </span>
-                  <Icon name="chevron-down" size={14} className="hidden text-[#78837f] sm:block" />
+                  <Icon name="chevron-down" size={13} className="hidden text-[#8E8E93] sm:block" />
                 </summary>
-                <div className="absolute right-0 top-full z-40 mt-2 w-56 rounded-2xl border border-[#e5e9e6] bg-white p-2 shadow-[0_16px_42px_rgba(24,39,32,.14)]">
-                  <div className="border-b border-[#edf0ed] px-3 py-2">
-                    <p className="truncate text-xs font-semibold">{user.displayName}</p>
-                    <p className="mt-1 truncate text-[11px] text-[#7d8883]">{user.email}</p>
+                <div className="absolute right-0 top-full z-50 mt-2 w-56 rounded-2xl border border-[#E5E5EA] bg-white p-2 shadow-[0_16px_42px_rgba(0,0,0,0.08)]">
+                  <div className="border-b border-[#E5E5EA] px-3 py-2">
+                    <p className="truncate text-xs font-semibold text-[#1D1D1F]">{user.displayName}</p>
+                    <p className="mt-0.5 truncate text-[11px] text-[#8E8E93]">{user.email}</p>
+                    <p className="mt-0.5 truncate text-[10px] font-medium capitalize text-[#007AFF]">
+                      {user.role} workspace
+                    </p>
                   </div>
                   {user.role === "owner" || user.permissions?.includes("settings:manage") ? (
                     <Link
                       href="/settings"
-                      className="mt-1 block rounded-xl px-3 py-2.5 text-sm text-[#4d5a55] hover:bg-[#f4f6f4]"
+                      className="mt-1 block rounded-xl px-3 py-2 text-xs font-medium text-[#1D1D1F] hover:bg-[#F5F5F7]"
                     >
                       Academy settings
                     </Link>
@@ -554,7 +650,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
                   <button
                     type="button"
                     onClick={() => void logout().then(() => router.replace("/login"))}
-                    className="w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium text-[#a04438] hover:bg-[#fff4f1]"
+                    className="w-full rounded-xl px-3 py-2 text-left text-xs font-medium text-[#FF3B30] hover:bg-[#FFF1F0]"
                   >
                     Sign out
                   </button>
@@ -563,11 +659,35 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
             </div>
           </div>
         </header>
+
+        {/* Core Main Area */}
         <main
-          className={`${compactStudentsPage ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" : "min-w-0 flex-1"}`}
+          className={`${compactStudentsPage ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" : "min-w-0 flex-1 bg-white"}`}
         >
           {children}
         </main>
+
+        {/* Apple-style Restrained Footer */}
+        {!compactStudentsPage && (
+          <footer className="mt-auto border-t border-[#E5E5EA] bg-white px-6 py-4 text-xs text-[#8E8E93]">
+            <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-3">
+              <span>© 2026 SportDesk Academy Management • All rights reserved</span>
+              <div className="flex items-center gap-4 text-[11px] text-[#6E6E73]">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#34C759]" /> System Online
+                </span>
+                <span>•</span>
+                <Link href="/operations?section=calendar" className="hover:text-[#007AFF] hover:underline">
+                  Operations Center
+                </Link>
+                <span>•</span>
+                <Link href="/settings" className="hover:text-[#007AFF] hover:underline">
+                  Settings
+                </Link>
+              </div>
+            </div>
+          </footer>
+        )}
       </div>
     </div>
   );

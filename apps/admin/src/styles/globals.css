@@ -2,19 +2,51 @@
 
 :root {
   color-scheme: light;
-  --background: #f6f7f5;
-  --foreground: #1b292d;
-  --muted: #68756f;
-  --line: #e5eae6;
-  --surface: #ffffff;
-  --accent: #176e67;
-  --accent-strong: #115e57;
-  --accent-soft: #eaf3ef;
-  --warning: #a86d2d;
-  --success: #39785f;
-  --danger: #a54b3e;
-  --radius-card: 18px;
-  --shadow-soft: 0 8px 28px rgb(25 44 35 / 4%);
+
+  /* Apple Modern Foundations */
+  --background: #FFFFFF;
+  --surface: #FFFFFF;
+  --surface-secondary: #F5F5F7;
+  --surface-elevated: #FFFFFF;
+
+  /* Apple Typography & Ink */
+  --foreground: #1D1D1F;
+  --text-secondary: #6E6E73;
+  --muted: #8E8E93;
+
+  /* Apple Neutral Borders & Dividers */
+  --line: #E5E5EA;
+  --line-strong: #D1D1D6;
+
+  /* Apple Primary Brand Blue & Focus */
+  --accent: #007AFF;
+  --accent-strong: #0066D6;
+  --accent-soft: #EBF5FF;
+
+  /* iOS-Inspired Semantic Accents */
+  --ios-blue: #007AFF;
+  --ios-indigo: #5856D6;
+  --ios-cyan: #34AADC;
+  --ios-lightblue: #5AC8FA;
+  --ios-green: #34C759;
+  --ios-red: #FF2D55;
+  --ios-orange-red: #FF3B30;
+  --ios-orange: #FF9500;
+  --ios-yellow: #FFCC00;
+  --ios-grey: #8E8E93;
+
+  /* Semantic State Tokens */
+  --success: #34C759;
+  --warning: #FF9500;
+  --danger: #FF3B30;
+  --info: #007AFF;
+
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-card: 16px;
+  --radius-panel: 20px;
+  --shadow-soft: 0 4px 20px rgba(0, 0, 0, 0.04);
+  --shadow-elevated: 0 12px 36px rgba(0, 0, 0, 0.08);
 }
 
 @theme inline {
@@ -25,6 +57,7 @@
   --color-surface: var(--surface);
   --color-accent: var(--accent);
   --color-success: var(--success);
+  --color-warning: var(--warning);
   --color-danger: var(--danger);
 }
 
@@ -42,11 +75,15 @@ body {
   color: var(--foreground);
   background: var(--background);
   font-family:
-    ui-sans-serif,
-    system-ui,
     -apple-system,
     BlinkMacSystemFont,
+    "SF Pro Text",
+    "SF Pro Display",
+    system-ui,
     "Segoe UI",
+    Roboto,
+    Helvetica,
+    Arial,
     sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -67,11 +104,11 @@ a {
   text-decoration: none;
 }
 :where(a, button, input, textarea, select, summary):focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--accent) 62%, white);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 ::placeholder {
-  color: #89949d;
+  color: var(--muted);
   opacity: 1;
 }
 button:disabled {
@@ -86,7 +123,7 @@ button:disabled {
   width: 100%;
   max-width: 1440px;
   margin-inline: auto;
-  padding: 28px clamp(16px, 3vw, 40px) 48px;
+  padding: 24px clamp(16px, 3vw, 40px) 48px;
 }
 
 .sd-surface {
@@ -97,24 +134,24 @@ button:disabled {
 }
 
 .sd-eyebrow {
-  color: #77847e;
-  font-size: 10px;
-  font-weight: 650;
-  letter-spacing: 0.14em;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   line-height: 1.4;
   text-transform: uppercase;
 }
 
 .sd-page-title {
-  color: #1d2b2f;
+  color: var(--foreground);
   font-size: clamp(24px, 2vw, 30px);
-  font-weight: 650;
-  letter-spacing: -0.04em;
-  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
 }
 
 .sd-section-title {
-  color: #24312c;
+  color: var(--foreground);
   font-size: 15px;
   font-weight: 650;
   letter-spacing: -0.015em;
@@ -199,7 +236,7 @@ button:disabled {
 
 .sd-sidebar-nav {
   scrollbar-width: thin;
-  scrollbar-color: #d6dfda transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
 }
 
 .sd-sidebar-nav::-webkit-scrollbar {
@@ -208,7 +245,7 @@ button:disabled {
 
 .sd-sidebar-nav::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: #d6dfda;
+  background: rgba(0, 0, 0, 0.12);
 }
 
 [data-collapsed="true"] .sd-sidebar-nav {

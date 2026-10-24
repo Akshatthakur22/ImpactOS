@@ -4,10 +4,12 @@ import { useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { Permission } from "@sportdesk/contracts";
 import { useAuth } from "@/hooks/use-auth";
+import { PageHeader } from "@/components/layout/page-header";
 
 export type WorkspaceTab = {
   id: string;
   label: string;
+  icon?: ReactNode;
   content: ReactNode;
   permission?: Permission;
   permissions?: Permission[];
@@ -33,10 +35,18 @@ export function WorkspaceModule({
       (tab.permissions?.some((permission) => user?.permissions?.includes(permission)) ?? false),
   );
   const [requestedTab, setRequestedTab] = useState(initialTab ?? "");
-  const requested = requestedTab;
-  const activeTab = visibleTabs.some((tab) => tab.id === requested)
-    ? requested
-    : (visibleTabs[0]?.id ?? "");
+  const aliasMap: Record<string, string> = {
+    schedule: "calendar",
+    programs: "classes",
+    batches: "classes",
+    branches: "facilities",
+  };
+  const resolvedRequested = aliasMap[requestedTab] || requestedTab;
+  const activeTab = visibleTabs.some((tab) => tab.id === resolvedRequested)
+    ? resolvedRequested
+    : (visibleTabs.some((tab) => tab.id === requestedTab)
+      ? requestedTab
+      : (visibleTabs[0]?.id ?? ""));
   const activeContent = visibleTabs.find((tab) => tab.id === activeTab)?.content;
 
   useEffect(() => {
@@ -64,13 +74,9 @@ export function WorkspaceModule({
   }
 
   return (
-    <section className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-7 sm:py-8 xl:px-10">
-      <header className="max-w-3xl">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#7d8984]">Workspace</p>
-        <h2 className="mt-1 text-xl font-semibold tracking-[-0.025em] text-[#24312c]">{title}</h2>
-        <p className="mt-1.5 text-[13px] leading-5 text-[#73807a]">{description}</p>
-      </header>
-      <div className="mt-5 border-b border-[#e5eae6]">
+    <section className="mx-auto w-full max-w-[1440px] px-4 py-4 sm:px-7 sm:py-6 xl:px-10">
+      <PageHeader title={title} description={description} />
+      <div className="border-b border-[#E5E5EA]">
         <div className="flex gap-1 overflow-x-auto" role="tablist" aria-label={`${title} sections`}>
           {visibleTabs.map((tab) => (
             <button
@@ -94,12 +100,13 @@ export function WorkspaceModule({
                 document.getElementById(`${title.toLowerCase().replaceAll(" ", "-")}-${next.id}-tab`)?.focus();
               }}
               tabIndex={activeTab === tab.id ? 0 : -1}
-              className={`whitespace-nowrap border-b-2 px-3 py-2.5 text-[13px] transition-colors sm:px-4 ${
+              className={`flex items-center gap-2 whitespace-nowrap border-b-2 px-3.5 py-2.5 text-[13px] transition-colors sm:px-4 ${
                 activeTab === tab.id
-                  ? "border-[#176e67] font-semibold text-[#176e67]"
-                  : "border-transparent text-[#77837e] hover:text-[#26332e]"
+                  ? "border-[#007AFF] font-semibold text-[#007AFF]"
+                  : "border-transparent text-[#6E6E73] hover:text-[#1D1D1F]"
               }`}
             >
+              {tab.icon}
               {tab.label}
             </button>
           ))}
