@@ -66,11 +66,11 @@ const navigationGroups: NavigationGroup[] = [
             permissions: ["academy:manage", "schedules:read"],
           },
           {
-            href: "/operations?section=attendance",
-            label: "Attendance",
-            section: "attendance",
-            icon: "check-circle",
-            permissions: ["attendance:read"],
+            href: "/operations?section=coaches",
+            label: "Coaches",
+            section: "coaches",
+            icon: "whistle",
+            permissions: ["coaches:read"],
           },
           {
             href: "/operations?section=facilities",
@@ -78,6 +78,13 @@ const navigationGroups: NavigationGroup[] = [
             section: "facilities",
             icon: "academy",
             permissions: ["settings:manage"],
+          },
+          {
+            href: "/operations?section=attendance",
+            label: "Attendance",
+            section: "attendance",
+            icon: "check-circle",
+            permissions: ["attendance:read"],
           },
           {
             href: "/operations?section=rules",
@@ -196,13 +203,15 @@ function Brand({ compact = false }: { compact?: boolean }) {
 export function WorkspaceShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const compactStudentsPage = pathname === "/students";
   const { user, loading, sessionRestoreError, refreshSession, logout } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [currentSection, setCurrentSection] = useState<string | null>(null);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [operationsExpanded, setOperationsExpanded] = useState(true);
   const mobileMenuButton = useRef<HTMLButtonElement>(null);
   const mobileDrawer = useRef<HTMLElement>(null);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
 
   const visibleGroups = useMemo(
     () =>
@@ -274,6 +283,34 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
       window.removeEventListener("sportdesk:section-change", syncSection);
     };
   }, [pathname]);
+
+  // Handle outside click & ESC key to close account dropdown
+  useEffect(() => {
+    if (!accountMenuOpen) return;
+
+    function handleClickOutside(event: MouseEvent) {
+      if (accountMenuRef.current && !accountMenuRef.current.contains(event.target as Node)) {
+        setAccountMenuOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setAccountMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [accountMenuOpen]);
+
+  useEffect(() => {
+    setAccountMenuOpen(false);
+  }, [pathname, currentSection]);
   useEffect(() => {
     setMobileOpen(false);
   }, [pathname, currentSection]);
@@ -445,65 +482,95 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
                   item.href.split("?")[0] === pathname;
 
                 const isOperations = item.label === "Operations";
-                const showSubItems = isOperations && isItemActive && (!collapsed || isMobile);
+                const showSubItems = isOperations && operationsExpanded && (!collapsed || isMobile);
 
                 return (
                   <div key={item.label} className="w-full">
-                    <Link
-                      href={item.href}
-                      onClick={() => {
-                        if (item.subItems && item.subItems.length > 0) {
-                          window.dispatchEvent(
-                            new CustomEvent("sportdesk:section-change", {
-                              detail: currentSection || "calendar",
-                            }),
-                          );
-                        }
-                      }}
-                      title={collapsed && !isMobile ? item.label : undefined}
-                      aria-label={item.label}
-                      aria-current={isItemActive ? "page" : undefined}
-                      className={`group flex min-h-[36px] items-center gap-2.5 rounded-xl px-2.5 text-[13px] font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#007AFF] ${
-                        collapsed && !isMobile ? "w-10 justify-center px-0" : ""
+                    <div
+                      className={`group flex min-h-[36px] items-center rounded-xl text-[13px] font-medium transition-all ${
+                        collapsed && !isMobile ? "w-10 justify-center px-0" : "px-2.5"
                       } ${
                         isItemActive
                           ? "bg-[#007AFF] text-white font-semibold shadow-sm shadow-[#007AFF]/25"
                           : "text-[#48484A] hover:bg-[#E5E5EA]/60 hover:text-[#1D1D1F]"
                       }`}
                     >
-                      <Icon
-                        name={item.icon}
-                        size={17}
-                        strokeWidth={isItemActive ? 2.2 : 1.7}
-                        className={isItemActive ? "text-white" : "text-[#8E8E93] group-hover:text-[#1D1D1F]"}
-                      />
-                      {(!collapsed || isMobile) && (
-                        <span className="flex-1 truncate">{item.label}</span>
-                      )}
+                      <Link
+                        href={item.href}
+                        onClick={() => {
+                          if (isOperations) {
+                            if (isItemActive) {
+                              setOperationsExpanded((prev) => !prev);
+                            } else {
+                              setOperationsExpanded(true);
+                              setCurrentSection("calendar");
+                              window.dispatchEvent(
+                                new CustomEvent("sportdesk:section-change", {
+                                  detail: "calendar",
+                                }),
+                              );
+                            }
+                          }
+                        }}
+                        title={collapsed && !isMobile ? item.label : undefined}
+                        aria-label={item.label}
+                        aria-current={isItemActive ? "page" : undefined}
+                        className="flex flex-1 min-w-0 items-center gap-2.5 py-2 focus-visible:outline-none"
+                      >
+                        <Icon
+                          name={item.icon}
+                          size={17}
+                          strokeWidth={isItemActive ? 2.2 : 1.7}
+                          className={isItemActive ? "text-white" : "text-[#8E8E93] group-hover:text-[#1D1D1F]"}
+                        />
+                        {(!collapsed || isMobile) && (
+                          <span className="flex-1 truncate">{item.label}</span>
+                        )}
+                      </Link>
+
                       {isOperations && (!collapsed || isMobile) && (
-                        <span className={`text-[10px] ${isItemActive ? "text-white/80" : "text-[#8E8E93]"}`}>
-                          <Icon name="chevron-down" size={12} />
-                        </span>
+                        <button
+                          type="button"
+                          aria-label={operationsExpanded ? "Collapse Operations menu" : "Expand Operations menu"}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setOperationsExpanded((prev) => !prev);
+                          }}
+                          className={`grid h-6 w-6 place-items-center rounded-lg transition-transform focus-visible:outline-none ${
+                            isItemActive
+                              ? "text-white/80 hover:bg-white/20"
+                              : "text-[#8E8E93] hover:bg-black/5 hover:text-[#1D1D1F]"
+                          }`}
+                        >
+                          <Icon
+                            name="chevron-down"
+                            size={12}
+                            className={`transition-transform duration-200 ${operationsExpanded ? "" : "-rotate-90"}`}
+                          />
+                        </button>
                       )}
-                    </Link>
+                    </div>
 
                     {/* Sub-navigation for Operations */}
                     {showSubItems && item.subItems && (
                       <div className="mt-1 ml-3.5 space-y-0.5 border-l border-[#E5E5EA] pl-2.5 py-1">
                         {item.subItems.map((sub) => {
-                          const isSubActive = (currentSection || "calendar") === sub.section;
+                          const isSubActive =
+                            isItemActive && (currentSection || "calendar") === sub.section;
 
                           return (
                             <Link
                               key={sub.section}
                               href={sub.href}
-                              onClick={() =>
+                              onClick={() => {
+                                setCurrentSection(sub.section);
                                 window.dispatchEvent(
                                   new CustomEvent("sportdesk:section-change", {
                                     detail: sub.section,
                                   }),
-                                )
-                              }
+                                );
+                              }}
                               aria-current={isSubActive ? "page" : undefined}
                               className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition-colors ${
                                 isSubActive
@@ -568,9 +635,9 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
 
   return (
     <div
-      className={`${compactStudentsPage ? "students-fixed-shell" : "min-h-screen"} bg-white text-[#1D1D1F] lg:flex`}
+      className="min-h-screen bg-white text-[#1D1D1F] lg:flex lg:h-screen lg:overflow-hidden"
     >
-      <div className="hidden shrink-0 lg:block">{sidebar()}</div>
+      <div className="hidden shrink-0 lg:block lg:h-screen lg:overflow-y-auto">{sidebar()}</div>
       {mobileOpen && (
         <div className="fixed inset-0 z-50 lg:hidden" role="presentation">
           <button
@@ -583,10 +650,10 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
         </div>
       )}
       <div
-        className={`${compactStudentsPage ? "h-full min-h-0" : "min-h-screen"} flex min-w-0 flex-1 flex-col bg-white`}
+        className="flex min-w-0 flex-1 flex-col bg-white lg:h-full lg:min-h-0 lg:overflow-hidden"
       >
-        <header className="sticky top-0 z-30 shrink-0 border-b border-[#E5E5EA] bg-white/95 px-4 backdrop-blur-md sm:px-7">
-          <div className="flex min-h-[60px] items-center justify-between gap-3">
+        <header className="sticky top-0 z-30 shrink-0 border-b border-[#E5E5EA] bg-white px-4 backdrop-blur-md sm:px-7">
+          <div className="flex min-h-[58px] items-center justify-between gap-3">
             {/* Left: Mobile trigger & Page Context */}
             <div className="flex items-center gap-3 min-w-0">
               <button
@@ -621,73 +688,105 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
               <NotificationPopover />
 
               {/* Account Dropdown */}
-              <details className="relative">
-                <summary
+              <div ref={accountMenuRef} className="relative">
+                <button
+                  type="button"
                   aria-label="Account menu"
-                  className="flex cursor-pointer list-none items-center gap-1 rounded-xl p-0.5 hover:bg-[#F5F5F7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#007AFF]"
+                  aria-expanded={accountMenuOpen}
+                  aria-haspopup="menu"
+                  onClick={() => setAccountMenuOpen((prev) => !prev)}
+                  className="flex cursor-pointer items-center gap-1 rounded-xl p-0.5 hover:bg-[#F5F5F7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#007AFF] transition-colors"
                 >
                   <span className="grid h-8 w-8 place-items-center rounded-full bg-[#007AFF] text-xs font-bold text-white shadow-xs">
                     {user.displayName.slice(0, 1).toUpperCase()}
                   </span>
-                  <Icon name="chevron-down" size={13} className="hidden text-[#8E8E93] sm:block" />
-                </summary>
-                <div className="absolute right-0 top-full z-50 mt-2 w-56 rounded-2xl border border-[#E5E5EA] bg-white p-2 shadow-[0_16px_42px_rgba(0,0,0,0.08)]">
-                  <div className="border-b border-[#E5E5EA] px-3 py-2">
-                    <p className="truncate text-xs font-semibold text-[#1D1D1F]">{user.displayName}</p>
-                    <p className="mt-0.5 truncate text-[11px] text-[#8E8E93]">{user.email}</p>
-                    <p className="mt-0.5 truncate text-[10px] font-medium capitalize text-[#007AFF]">
-                      {user.role} workspace
-                    </p>
-                  </div>
-                  {user.role === "owner" || user.permissions?.includes("settings:manage") ? (
-                    <Link
-                      href="/settings"
-                      className="mt-1 block rounded-xl px-3 py-2 text-xs font-medium text-[#1D1D1F] hover:bg-[#F5F5F7]"
-                    >
-                      Academy settings
-                    </Link>
-                  ) : null}
-                  <button
-                    type="button"
-                    onClick={() => void logout().then(() => router.replace("/login"))}
-                    className="w-full rounded-xl px-3 py-2 text-left text-xs font-medium text-[#FF3B30] hover:bg-[#FFF1F0]"
+                  <Icon
+                    name="chevron-down"
+                    size={13}
+                    className={`hidden text-[#8E8E93] transition-transform duration-200 sm:block ${
+                      accountMenuOpen ? "rotate-180" : ""
+                    }`}
+                  />
+                </button>
+
+                {accountMenuOpen && (
+                  <div
+                    role="menu"
+                    className="absolute right-0 top-full z-50 mt-2 w-56 rounded-2xl border border-[#E5E5EA] bg-white p-2 shadow-[0_16px_42px_rgba(0,0,0,0.08)] animate-in fade-in zoom-in-95 duration-100"
                   >
-                    Sign out
-                  </button>
-                </div>
-              </details>
+                    <div className="border-b border-[#E5E5EA] px-3 py-2">
+                      <p className="truncate text-xs font-semibold text-[#1D1D1F]">{user.displayName}</p>
+                      <p className="mt-0.5 truncate text-[11px] text-[#8E8E93]">{user.email}</p>
+                      <p className="mt-0.5 truncate text-[10px] font-medium capitalize text-[#007AFF]">
+                        {user.role} workspace
+                      </p>
+                    </div>
+                    {user.role === "owner" || user.permissions?.includes("settings:manage") ? (
+                      <Link
+                        href="/settings"
+                        onClick={() => setAccountMenuOpen(false)}
+                        className="mt-1 block rounded-xl px-3 py-2 text-xs font-medium text-[#1D1D1F] hover:bg-[#F5F5F7] transition-colors"
+                      >
+                        Academy settings
+                      </Link>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAccountMenuOpen(false);
+                        void logout().then(() => router.replace("/login"));
+                      }}
+                      className="w-full rounded-xl px-3 py-2 text-left text-xs font-medium text-[#FF3B30] hover:bg-[#FFF1F0] transition-colors"
+                    >
+                      Sign out
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </header>
 
         {/* Core Main Area */}
-        <main
-          className={`${compactStudentsPage ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" : "min-w-0 flex-1 bg-white"}`}
-        >
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-white">
           {children}
         </main>
 
-        {/* Apple-style Restrained Footer */}
-        {!compactStudentsPage && (
-          <footer className="mt-auto border-t border-[#E5E5EA] bg-white px-6 py-4 text-xs text-[#8E8E93]">
-            <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-3">
-              <span>© 2026 SportDesk Academy Management • All rights reserved</span>
-              <div className="flex items-center gap-4 text-[11px] text-[#6E6E73]">
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#34C759]" /> System Online
+        {/* Apple-Style Micro Status Bar / Footer */}
+        <footer className="sticky bottom-0 z-20 shrink-0 border-t border-[#E5E5EA] bg-[#F9F9FB] px-4 text-[11px] text-[#8E8E93] sm:px-6">
+          <div className="flex h-7 items-center justify-between gap-3">
+            {/* Left: System Status & Timezone */}
+            <div className="flex items-center gap-2.5">
+              <span className="flex items-center gap-1.5 font-medium text-[#1D1D1F]">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#34C759] opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-[#34C759]" />
                 </span>
-                <span>•</span>
-                <Link href="/operations?section=calendar" className="hover:text-[#007AFF] hover:underline">
-                  Operations Center
-                </Link>
-                <span>•</span>
-                <Link href="/settings" className="hover:text-[#007AFF] hover:underline">
-                  Settings
-                </Link>
-              </div>
+                <span>Operational</span>
+              </span>
+              <span className="text-[#C7C7CC]">•</span>
+              <span className="hidden sm:inline">SportDesk OS v1.0</span>
+              <span className="hidden text-[#C7C7CC] sm:inline">•</span>
+              <span className="hidden md:inline">Asia/Kolkata (IST · UTC+05:30)</span>
             </div>
-          </footer>
-        )}
+
+            {/* Right: Quick Links & Academy Context */}
+            <div className="flex items-center gap-3 font-medium">
+              <span className="truncate text-[#6E6E73]">{user.academyName}</span>
+              <span className="text-[#C7C7CC]">•</span>
+              <Link
+                href="/settings"
+                className="hover:text-[#007AFF] transition-colors"
+              >
+                Settings
+              </Link>
+              <span className="text-[#C7C7CC]">•</span>
+              <span className="rounded bg-[#E5E5EA] px-1.5 py-0.5 text-[10px] font-semibold text-[#6E6E73]">
+                PRO
+              </span>
+            </div>
+          </div>
+        </footer>
       </div>
     </div>
   );

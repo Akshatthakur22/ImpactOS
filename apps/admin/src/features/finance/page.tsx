@@ -632,7 +632,7 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
 
         {canReadFees && tab === "fees" ? (
           <div className={`mt-6 grid items-start gap-6 ${canRecordPayments ? "xl:grid-cols-[360px_minmax(0,1fr)]" : "xl:grid-cols-1"}`}>
-            {canRecordPayments ? <section className="rounded-2xl border border-line bg-white p-5 sm:p-6">
+            {canRecordPayments ? <section className="rounded-2xl border border-line bg-white p-5 sm:p-6 max-h-[calc(100vh-270px)] overflow-y-auto">
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted">
                 New student invoice
               </p>
@@ -741,13 +741,13 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
               </form>
             </section> : null}
 
-            <section className="min-w-0 rounded-2xl border border-line bg-white p-5 sm:p-6">
-              <div className="flex flex-wrap items-end justify-between gap-3">
+            <section className="min-w-0 rounded-2xl border border-line bg-white p-5 sm:p-6 flex flex-col max-h-[calc(100vh-270px)]">
+              <div className="shrink-0 flex flex-wrap items-end justify-between gap-3 pb-3 border-b border-line">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted">
                     Student ledger
                   </p>
-                  <h2 className="mt-2 text-lg font-semibold">Invoices and receipts</h2>
+                  <h2 className="mt-1 text-base font-semibold">Invoices and receipts</h2>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Input
@@ -760,7 +760,7 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
                     }}
                   />
                   <select
-                    className="h-11 rounded-xl border border-line bg-white px-3 text-sm"
+                    className="h-10 rounded-xl border border-line bg-white px-3 text-xs"
                     value={chargeState}
                     onChange={(event) => {
                       setChargeOffset(0);
@@ -778,13 +778,15 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
               </div>
 
               {loading ? (
-                <p className="mt-6 text-sm text-muted">Loading finance records…</p>
+                <p className="mt-6 rounded-xl bg-[#f5f7f7] px-4 py-6 text-sm text-muted">
+                  Loading finance records…
+                </p>
               ) : charges.length === 0 ? (
                 <p className="mt-6 rounded-xl bg-[#f5f7f7] px-4 py-6 text-sm text-muted">
                   No invoices match this view.
                 </p>
               ) : (
-                <div className="mt-5 space-y-3">
+                <div className="overflow-y-auto flex-1 mt-3 space-y-3 pr-1">
                   {charges.map((charge) => {
                     const open = charge.status === "issued" && charge.balancePaise > 0;
                     const waived = charge.amountPaise === charge.discountPaise;
@@ -1082,14 +1084,14 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
               </form>
             </section> : null}
 
-            {canManageExpenses ? <section className="min-w-0 rounded-2xl border border-line bg-white p-5 sm:p-6">
-              <div className="flex flex-wrap items-end justify-between gap-3">
+            {canManageExpenses ? <section className="min-w-0 rounded-2xl border border-line bg-white p-5 sm:p-6 flex flex-col max-h-[calc(100vh-270px)]">
+              <div className="shrink-0 flex flex-wrap items-end justify-between gap-3 pb-3 border-b border-line">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted">
                     Expense register
                   </p>
-                  <h2 className="mt-2 text-lg font-semibold">Operating costs</h2>
-                  <p className="mt-1 text-xs text-muted">
+                  <h2 className="mt-1 text-base font-semibold">Operating costs</h2>
+                  <p className="mt-0.5 text-xs text-muted">
                     {reportMonth} · {expenseTotal} records
                   </p>
                 </div>
@@ -1104,13 +1106,15 @@ export default function FinancePage({ initialTab = "fees" }: { initialTab?: Fina
                 />
               </div>
               {loading ? (
-                <p className="mt-6 text-sm text-muted">Loading expenses…</p>
+                <p className="mt-6 rounded-xl bg-[#f5f7f7] px-4 py-6 text-sm text-muted">
+                  Loading expenses…
+                </p>
               ) : expenses.length === 0 ? (
                 <p className="mt-6 rounded-xl bg-[#f5f7f7] px-4 py-6 text-sm text-muted">
                   No expenses match this period.
                 </p>
               ) : (
-                <div className="mt-5 space-y-2">
+                <div className="overflow-y-auto flex-1 mt-3 space-y-2 pr-1">
                   {expenses.map((expense) => (
                     <article
                       key={expense.id}

@@ -561,6 +561,25 @@ export default function OperationsCalendar() {
   const [filterCoach, setFilterCoach] = useState("all");
   const [filterFacility, setFilterFacility] = useState("all");
   const [filterBatch, setFilterBatch] = useState("all");
+  const [showFilterDrawer, setShowFilterDrawer] = useState(false);
+
+  const activeFiltersCount = useMemo(() => {
+    return [
+      filterBranch !== "all",
+      filterSport !== "all",
+      filterCoach !== "all",
+      filterFacility !== "all",
+      filterBatch !== "all",
+    ].filter(Boolean).length;
+  }, [filterBranch, filterSport, filterCoach, filterFacility, filterBatch]);
+
+  const clearAllFilters = useCallback(() => {
+    setFilterBranch("all");
+    setFilterSport("all");
+    setFilterCoach("all");
+    setFilterFacility("all");
+    setFilterBatch("all");
+  }, []);
 
   // Modals
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -749,29 +768,6 @@ export default function OperationsCalendar() {
     });
   }, [rawSessions, batchMetaMap]);
 
-  // Selected session object
-  const selectedSession = useMemo(() => {
-    if (!selectedSessionId && enrichedSessions.length > 0) {
-      // Pick first non-cancelled session or first session
-      return enrichedSessions.find((s) => s.status !== "cancelled") || enrichedSessions[0];
-    }
-    return enrichedSessions.find((s) => s.id === selectedSessionId) || enrichedSessions[0] || null;
-  }, [selectedSessionId, enrichedSessions]);
-
-  // Fetch attendance records when selectedSession changes
-  useEffect(() => {
-    if (!accessToken || !selectedSession) return;
-    const from = new Date(new Date(selectedSession.startsAt).getTime() - 86_400_000).toISOString();
-    const to = new Date(new Date(selectedSession.endsAt).getTime() + 86_400_000).toISOString();
-    getAttendance(accessToken, refreshSession, from, to, { sessionId: selectedSession.id })
-      .then((res) => {
-        setSessionAttendance(res.records);
-      })
-      .catch(() => {
-        setSessionAttendance([]);
-      });
-  }, [accessToken, refreshSession, selectedSession]);
-
   // Filtered Sessions
   const filteredSessions = useMemo(() => {
     return enrichedSessions.filter((s) => {
@@ -804,6 +800,41 @@ export default function OperationsCalendar() {
       return d;
     });
   }, [currentDate]);
+
+  // Selected session object (prefers matching selectedSessionId, then session in current week view, then any active session)
+  const selectedSession = useMemo(() => {
+    if (selectedSessionId) {
+      const match = enrichedSessions.find((s) => s.id === selectedSessionId);
+      if (match) return match;
+    }
+    // Prefer session in the current visible week
+    const firstDay = weekDays[0];
+    const lastDay = weekDays[6];
+    if (firstDay && lastDay) {
+      const weekStart = firstDay.getTime();
+      const weekEnd = lastDay.getTime() + 86_400_000;
+      const sessionInWeek = filteredSessions.find((s) => {
+        const t = new Date(s.startsAt).getTime();
+        return t >= weekStart && t <= weekEnd && s.status !== "cancelled";
+      });
+      if (sessionInWeek) return sessionInWeek;
+    }
+    return filteredSessions.find((s) => s.status !== "cancelled") || filteredSessions[0] || enrichedSessions[0] || null;
+  }, [selectedSessionId, enrichedSessions, filteredSessions, weekDays]);
+
+  // Fetch attendance records when selectedSession changes
+  useEffect(() => {
+    if (!accessToken || !selectedSession) return;
+    const from = new Date(new Date(selectedSession.startsAt).getTime() - 86_400_000).toISOString();
+    const to = new Date(new Date(selectedSession.endsAt).getTime() + 86_400_000).toISOString();
+    getAttendance(accessToken, refreshSession, from, to, { sessionId: selectedSession.id })
+      .then((res) => {
+        setSessionAttendance(res.records);
+      })
+      .catch(() => {
+        setSessionAttendance([]);
+      });
+  }, [accessToken, refreshSession, selectedSession]);
 
   // Format date header string (e.g. Oct 26 – Nov 1, 2026)
   const headerDateRangeString = useMemo(() => {
@@ -1097,163 +1128,280 @@ export default function OperationsCalendar() {
         </div>
       )}
 
-      {/* FILTER & CONTROL BAR (Exactly matching reference image) */}
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-white p-3.5 shadow-sm">
-        {/* Filters Left */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* All Branches */}
-          <select
-            aria-label="Filter branch"
-            className="h-9 rounded-lg border border-line bg-[#f8fafb] px-3 text-xs font-medium text-foreground outline-none hover:border-[#cbd5e1] focus:border-accent"
-            value={filterBranch}
-            onChange={(e) => setFilterBranch(e.target.value)}
-          >
-            <option value="all">All Branches</option>
-            {branches.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
-            ))}
-          </select>
+      {/* UNIFIED APPLE-INSPIRED CALENDAR TOOLBAR */}
+      <div className="mb-3 rounded-2xl border border-[#E5E5EA] bg-white p-2.5 shadow-xs">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* Left: Date Navigator & Range Title */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex items-center rounded-xl border border-[#E5E5EA] bg-[#F9F9FB] p-0.5">
+              <button
+                type="button"
+                aria-label="Previous period"
+                onClick={handlePrev}
+                className="grid h-7 w-7 place-items-center rounded-lg text-[#8E8E93] hover:bg-white hover:text-[#1D1D1F] hover:shadow-xs focus-visible:outline-none transition-all"
+              >
+                <Icon name="chevron-left" size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={handleToday}
+                className="px-2.5 py-1 text-xs font-semibold text-[#1D1D1F] hover:bg-white hover:shadow-xs rounded-lg transition-all"
+              >
+                Today
+              </button>
+              <button
+                type="button"
+                aria-label="Next period"
+                onClick={handleNext}
+                className="grid h-7 w-7 place-items-center rounded-lg text-[#8E8E93] hover:bg-white hover:text-[#1D1D1F] hover:shadow-xs focus-visible:outline-none transition-all"
+              >
+                <Icon name="chevron-right" size={14} />
+              </button>
+            </div>
 
-          {/* All Sports */}
-          <select
-            aria-label="Filter sport"
-            className="h-9 rounded-lg border border-line bg-[#f8fafb] px-3 text-xs font-medium text-foreground outline-none hover:border-[#cbd5e1] focus:border-accent"
-            value={filterSport}
-            onChange={(e) => setFilterSport(e.target.value)}
-          >
-            <option value="all">All Sports</option>
-            {(catalog?.disciplines ?? []).map((d) => (
-              <option key={d.id} value={d.name}>
-                {d.name}
-              </option>
-            ))}
-            <option value="Cricket">Cricket</option>
-            <option value="Football">Football</option>
-            <option value="Fitness">Fitness</option>
-            <option value="Yoga">Yoga</option>
-            <option value="Swimming">Swimming</option>
-          </select>
-
-          {/* All Coaches */}
-          <select
-            aria-label="Filter coach"
-            className="h-9 rounded-lg border border-line bg-[#f8fafb] px-3 text-xs font-medium text-foreground outline-none hover:border-[#cbd5e1] focus:border-accent"
-            value={filterCoach}
-            onChange={(e) => setFilterCoach(e.target.value)}
-          >
-            <option value="all">All Coaches</option>
-            {coaches.map((c) => (
-              <option key={c.id} value={c.displayName}>
-                {c.displayName}
-              </option>
-            ))}
-            <option value="Coach Ravi">Coach Ravi</option>
-            <option value="Coach Priya">Coach Priya</option>
-            <option value="Coach Imran">Coach Imran</option>
-            <option value="Coach Alex">Coach Alex</option>
-            <option value="Coach Neha">Coach Neha</option>
-            <option value="Coach Sameer">Coach Sameer</option>
-          </select>
-
-          {/* All Facilities / Venues */}
-          <select
-            aria-label="Filter facility"
-            className="h-9 rounded-lg border border-line bg-[#f8fafb] px-3 text-xs font-medium text-foreground outline-none hover:border-[#cbd5e1] focus:border-accent"
-            value={filterFacility}
-            onChange={(e) => setFilterFacility(e.target.value)}
-          >
-            <option value="all">All Facilities</option>
-            <option value="Main Ground">Main Ground</option>
-            <option value="Field A">Field A</option>
-            <option value="Field B">Field B</option>
-            <option value="Gym Hall">Gym Hall</option>
-            <option value="Studio">Studio</option>
-            <option value="Pool">Pool</option>
-          </select>
-
-          {/* All Batches */}
-          <select
-            aria-label="Filter batch"
-            className="h-9 rounded-lg border border-line bg-[#f8fafb] px-3 text-xs font-medium text-foreground outline-none hover:border-[#cbd5e1] focus:border-accent"
-            value={filterBatch}
-            onChange={(e) => setFilterBatch(e.target.value)}
-          >
-            <option value="all">All Batches</option>
-            {(catalog?.batches ?? []).map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name} · {b.programName}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Date Navigator Center/Right */}
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 rounded-lg border border-line bg-white p-0.5">
-            <button
-              type="button"
-              aria-label="Previous period"
-              onClick={handlePrev}
-              className="flex size-7 items-center justify-center rounded-md text-muted hover:bg-[#f1f5f9] hover:text-foreground"
-            >
-              <Icon name="chevron-left" size={15} />
-            </button>
-            <button
-              type="button"
-              onClick={handleToday}
-              className="px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-[#f1f5f9] rounded-md"
-            >
-              Today
-            </button>
-            <button
-              type="button"
-              aria-label="Next period"
-              onClick={handleNext}
-              className="flex size-7 items-center justify-center rounded-md text-muted hover:bg-[#f1f5f9] hover:text-foreground"
-            >
-              <Icon name="chevron-right" size={15} />
-            </button>
+            <div className="flex items-center gap-2 px-1 text-sm font-bold text-[#1D1D1F]">
+              <span className="text-[#8E8E93]">
+                <Icon name="calendar" size={15} />
+              </span>
+              <span>{headerDateRangeString}</span>
+              {loading && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-[#007AFF]/10 px-2 py-0.5 text-[10px] font-semibold text-[#007AFF]">
+                  <Icon name="refresh" size={10} className="animate-spin" />
+                  <span>Syncing…</span>
+                </span>
+              )}
+            </div>
           </div>
 
-          <div className="flex items-center gap-2 rounded-lg border border-line bg-[#f8fafb] px-3 py-1.5 text-xs font-semibold text-foreground">
-            <Icon name="calendar" size={14} className="text-muted" />
-            <span>{headerDateRangeString}</span>
-            {loading && <span className="ml-1 text-[10px] text-muted animate-pulse">Syncing…</span>}
-          </div>
-
-          {/* View Mode Switcher */}
-          <div className="flex items-center rounded-lg border border-line bg-[#f1f4f6] p-0.5">
+          {/* Center: Apple-style Segmented View Switcher */}
+          <div className="inline-flex items-center rounded-xl bg-[#F2F2F7] p-0.5">
             {(["day", "week", "month", "agenda"] as CalendarView[]).map((v) => (
               <button
                 key={v}
                 type="button"
                 onClick={() => setViewMode(v)}
-                className={`rounded-md px-3 py-1 text-xs font-semibold capitalize transition-all ${
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold capitalize transition-all ${
                   viewMode === v
-                    ? "bg-[#007AFF] text-white shadow-sm"
-                    : "text-muted hover:text-foreground"
+                    ? "bg-white text-[#1D1D1F] shadow-xs"
+                    : "text-[#8E8E93] hover:text-[#1D1D1F]"
                 }`}
               >
                 {v}
               </button>
             ))}
           </div>
+
+          {/* Right: Quick Sport Selector & Filter Toggle */}
+          <div className="flex items-center gap-2">
+            {/* Quick Sport Dropdown */}
+            <div className="relative">
+              <select
+                aria-label="Filter sport"
+                className="h-8 rounded-xl border border-[#E5E5EA] bg-[#F9F9FB] pl-3 pr-7 text-xs font-semibold text-[#1D1D1F] outline-none hover:bg-white hover:border-[#C7C7CC] focus:border-[#007AFF] transition-all cursor-pointer appearance-none"
+                value={filterSport}
+                onChange={(e) => setFilterSport(e.target.value)}
+              >
+                <option value="all">All Sports</option>
+                {(catalog?.disciplines ?? []).map((d) => (
+                  <option key={d.id} value={d.name}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+              <div className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8E8E93]">
+                <Icon name="chevron-down" size={11} />
+              </div>
+            </div>
+
+            {/* Filter Toggle Button */}
+            <button
+              type="button"
+              onClick={() => setShowFilterDrawer((prev) => !prev)}
+              className={`inline-flex h-8 items-center gap-1.5 rounded-xl border px-3 text-xs font-semibold transition-all ${
+                activeFiltersCount > 0 || showFilterDrawer
+                  ? "border-[#007AFF] bg-[#007AFF]/10 text-[#007AFF]"
+                  : "border-[#E5E5EA] bg-[#F9F9FB] text-[#48484A] hover:bg-white hover:border-[#C7C7CC]"
+              }`}
+            >
+              <Icon name="filter" size={13} />
+              <span>Filters</span>
+              {activeFiltersCount > 0 && (
+                <span className="grid h-4 min-w-4 place-items-center rounded-full bg-[#007AFF] px-1 text-[10px] font-bold text-white">
+                  {activeFiltersCount}
+                </span>
+              )}
+            </button>
+
+            {/* Reset text if any filter is active */}
+            {activeFiltersCount > 0 && (
+              <button
+                type="button"
+                onClick={clearAllFilters}
+                className="text-xs font-medium text-[#8E8E93] hover:text-[#FF3B30] transition-colors"
+                title="Reset all filters"
+              >
+                Reset
+              </button>
+            )}
+          </div>
         </div>
+
+        {/* Expandable Filter Drawer */}
+        {showFilterDrawer && (
+          <div className="mt-3 border-t border-[#E5E5EA] pt-3 animate-in fade-in slide-in-from-top-1 duration-150">
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 md:grid-cols-5">
+              {/* Branch */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-[#8E8E93]">
+                  Branch
+                </label>
+                <select
+                  aria-label="Filter branch"
+                  className="h-8 w-full rounded-xl border border-[#E5E5EA] bg-[#F9F9FB] px-2.5 text-xs text-[#1D1D1F] outline-none focus:border-[#007AFF]"
+                  value={filterBranch}
+                  onChange={(e) => setFilterBranch(e.target.value)}
+                >
+                  <option value="all">All Branches</option>
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Coach */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-[#8E8E93]">
+                  Coach
+                </label>
+                <select
+                  aria-label="Filter coach"
+                  className="h-8 w-full rounded-xl border border-[#E5E5EA] bg-[#F9F9FB] px-2.5 text-xs text-[#1D1D1F] outline-none focus:border-[#007AFF]"
+                  value={filterCoach}
+                  onChange={(e) => setFilterCoach(e.target.value)}
+                >
+                  <option value="all">All Coaches</option>
+                  {coaches.map((c) => (
+                    <option key={c.id} value={c.displayName}>
+                      {c.displayName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Facility */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-[#8E8E93]">
+                  Facility / Venue
+                </label>
+                <select
+                  aria-label="Filter facility"
+                  className="h-8 w-full rounded-xl border border-[#E5E5EA] bg-[#F9F9FB] px-2.5 text-xs text-[#1D1D1F] outline-none focus:border-[#007AFF]"
+                  value={filterFacility}
+                  onChange={(e) => setFilterFacility(e.target.value)}
+                >
+                  <option value="all">All Facilities</option>
+                  <option value="Main Ground">Main Ground</option>
+                  <option value="Field A">Field A</option>
+                  <option value="Field B">Field B</option>
+                  <option value="Gym Hall">Gym Hall</option>
+                  <option value="Studio">Studio</option>
+                  <option value="Pool">Pool</option>
+                </select>
+              </div>
+
+              {/* Batch */}
+              <div className="space-y-1 sm:col-span-2 md:col-span-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-[#8E8E93]">
+                  Batch
+                </label>
+                <select
+                  aria-label="Filter batch"
+                  className="h-8 w-full rounded-xl border border-[#E5E5EA] bg-[#F9F9FB] px-2.5 text-xs text-[#1D1D1F] outline-none focus:border-[#007AFF]"
+                  value={filterBatch}
+                  onChange={(e) => setFilterBatch(e.target.value)}
+                >
+                  <option value="all">All Batches</option>
+                  {(catalog?.batches ?? []).map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name} ({b.programName})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Reset Actions */}
+              <div className="flex items-end sm:col-span-2 md:col-span-1">
+                <button
+                  type="button"
+                  onClick={clearAllFilters}
+                  disabled={activeFiltersCount === 0}
+                  className="h-8 w-full rounded-xl border border-dashed border-[#E5E5EA] text-xs font-semibold text-[#8E8E93] hover:border-[#FF3B30] hover:text-[#FF3B30] disabled:opacity-40 disabled:hover:border-[#E5E5EA] disabled:hover:text-[#8E8E93] transition-colors"
+                >
+                  Clear All Filters
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Active Filter Chips (visible when drawer is collapsed but filters are applied) */}
+        {!showFilterDrawer && activeFiltersCount > 0 && (
+          <div className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-[#E5E5EA] pt-2">
+            <span className="text-[11px] font-medium text-[#8E8E93]">Active:</span>
+            {filterSport !== "all" && (
+              <span className="inline-flex items-center gap-1 rounded-lg bg-[#007AFF]/10 px-2 py-0.5 text-[11px] font-semibold text-[#007AFF]">
+                Sport: {filterSport}
+                <button type="button" onClick={() => setFilterSport("all")} className="hover:opacity-75">✕</button>
+              </span>
+            )}
+            {filterBranch !== "all" && (
+              <span className="inline-flex items-center gap-1 rounded-lg bg-[#007AFF]/10 px-2 py-0.5 text-[11px] font-semibold text-[#007AFF]">
+                Branch: {branches.find((b) => b.id === filterBranch)?.name || filterBranch}
+                <button type="button" onClick={() => setFilterBranch("all")} className="hover:opacity-75">✕</button>
+              </span>
+            )}
+            {filterCoach !== "all" && (
+              <span className="inline-flex items-center gap-1 rounded-lg bg-[#007AFF]/10 px-2 py-0.5 text-[11px] font-semibold text-[#007AFF]">
+                Coach: {filterCoach}
+                <button type="button" onClick={() => setFilterCoach("all")} className="hover:opacity-75">✕</button>
+              </span>
+            )}
+            {filterFacility !== "all" && (
+              <span className="inline-flex items-center gap-1 rounded-lg bg-[#007AFF]/10 px-2 py-0.5 text-[11px] font-semibold text-[#007AFF]">
+                Venue: {filterFacility}
+                <button type="button" onClick={() => setFilterFacility("all")} className="hover:opacity-75">✕</button>
+              </span>
+            )}
+            {filterBatch !== "all" && (
+              <span className="inline-flex items-center gap-1 rounded-lg bg-[#007AFF]/10 px-2 py-0.5 text-[11px] font-semibold text-[#007AFF]">
+                Batch: {catalog?.batches.find((b) => b.id === filterBatch)?.name || filterBatch}
+                <button type="button" onClick={() => setFilterBatch("all")} className="hover:opacity-75">✕</button>
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={clearAllFilters}
+              className="text-[11px] font-semibold text-[#FF3B30] hover:underline ml-1"
+            >
+              Clear all
+            </button>
+          </div>
+        )}
       </div>
 
       {/* MAIN TWO-COLUMN WORKSPACE */}
-      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[1fr_390px] xl:grid-cols-[1fr_420px]">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_390px] xl:grid-cols-[1fr_420px] lg:h-[calc(100vh-172px)]">
         {/* LEFT: CALENDAR VIEW */}
-        <div className="overflow-hidden rounded-2xl border border-line bg-white shadow-sm">
+        <div className="flex flex-col h-full overflow-hidden rounded-2xl border border-line bg-white shadow-sm">
           {/* WEEK VIEW */}
           {viewMode === "week" && (
-            <div className="overflow-x-auto">
+            <div className="flex-1 overflow-x-auto overflow-y-auto">
               <div className="min-w-[760px]">
-                {/* Day Header Row */}
-                <div className="grid grid-cols-[70px_repeat(7,1fr)] border-b border-line bg-[#fbfcfc] text-xs font-semibold">
-                  <div className="p-3 text-center text-muted border-r border-line" />
+                {/* Day Header Row (Sticky) */}
+                <div className="sticky top-0 z-20 grid grid-cols-[70px_repeat(7,1fr)] border-b border-line bg-[#fbfcfc] text-xs font-semibold shadow-xs">
+                  <div className="p-3 text-center text-muted border-r border-line bg-[#fbfcfc]" />
                   {weekDays.map((day, idx) => {
                     const isToday =
                       day.toDateString() === new Date().toDateString();
@@ -1415,7 +1563,7 @@ export default function OperationsCalendar() {
 
           {/* DAY VIEW */}
           {viewMode === "day" && (
-            <div className="p-4">
+            <div className="flex-1 p-4 overflow-y-auto">
               <div className="mb-4 flex items-center justify-between border-b border-line pb-3">
                 <h3 className="text-base font-semibold">
                   {new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(currentDate)}
@@ -1483,7 +1631,7 @@ export default function OperationsCalendar() {
 
           {/* MONTH VIEW */}
           {viewMode === "month" && (
-            <div className="p-4">
+            <div className="flex-1 p-4 overflow-y-auto">
               <div className="grid grid-cols-7 gap-px border border-line bg-line rounded-xl overflow-hidden">
                 {DAYS_NAMES.map((d) => (
                   <div key={d} className="bg-[#f8fafb] p-2 text-center text-xs font-semibold text-muted">
@@ -1544,7 +1692,7 @@ export default function OperationsCalendar() {
 
           {/* AGENDA VIEW */}
           {viewMode === "agenda" && (
-            <div className="p-5">
+            <div className="flex-1 p-5 overflow-y-auto">
               <h3 className="text-base font-semibold mb-4">Agenda List</h3>
               <div className="divide-y divide-line">
                 {filteredSessions.map((s) => {
@@ -1587,8 +1735,8 @@ export default function OperationsCalendar() {
           )}
         </div>
 
-        {/* RIGHT: CONTEXTUAL SESSION DETAILS PANEL (Matching Reference Image) */}
-        <div className="rounded-2xl border border-line bg-white p-5 shadow-sm space-y-4">
+        {/* RIGHT: CONTEXTUAL SESSION DETAILS PANEL */}
+        <div className="flex flex-col h-full rounded-2xl border border-line bg-white p-5 shadow-sm space-y-4 overflow-y-auto">
           {/* Top Panel Actions: Create Session & Options */}
           <div className="flex items-center justify-between gap-2">
             <Button
@@ -1992,156 +2140,6 @@ export default function OperationsCalendar() {
               )}
             </div>
           )}
-        </div>
-      </div>
-
-      {/* BOTTOM SUMMARY & KPI DASHBOARD (Matching Reference Image) */}
-      <div className="mt-6 rounded-2xl border border-line bg-white p-5 shadow-sm space-y-5">
-        {/* Legend Row */}
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-line pb-4 text-xs font-medium">
-          {/* Sports Legend */}
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="font-semibold text-muted uppercase tracking-wider text-[11px]">Sports:</span>
-            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-[#22c55e]" /> Cricket</span>
-            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-[#3b82f6]" /> Football</span>
-            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-[#a855f7]" /> Fitness</span>
-            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-[#ec4899]" /> Yoga</span>
-            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-[#06b6d4]" /> Swimming</span>
-          </div>
-
-          {/* Statuses Legend */}
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="font-semibold text-muted uppercase tracking-wider text-[11px]">Status:</span>
-            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-[#38bdf8]" /> Scheduled</span>
-            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-[#22c55e]" /> In Progress</span>
-            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-[#cbd5e1]" /> Completed</span>
-            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-[#f87171]" /> Cancelled</span>
-            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-[#fbbf24]" /> Rescheduled</span>
-            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-[#ef4444]" /> Conflict</span>
-          </div>
-        </div>
-
-        {/* 4 Summary Metric Cards */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {/* Card 1: Today's Summary */}
-          <div className="rounded-xl border border-line bg-[#f8fafb] p-4">
-            <div className="flex items-center justify-between">
-              <h4 className="font-semibold text-xs text-foreground">Today's Summary</h4>
-              <span className="text-[10px] font-semibold text-[#007AFF] cursor-pointer hover:underline">View All</span>
-            </div>
-            <div className="mt-3 grid grid-cols-4 gap-1.5 text-center">
-              <div className="rounded-lg bg-white p-2 border border-line">
-                <span className="block text-base font-bold text-foreground">
-                  {enrichedSessions.filter((s) => academyDate(new Date(s.startsAt), timezone) === academyDate(new Date(), timezone)).length || 12}
-                </span>
-                <span className="text-[9px] font-medium text-muted">Sessions</span>
-              </div>
-              <div className="rounded-lg bg-white p-2 border border-line">
-                <span className="block text-base font-bold text-foreground">{coaches.length || 5}</span>
-                <span className="text-[9px] font-medium text-muted">Coaches</span>
-              </div>
-              <div className="rounded-lg bg-white p-2 border border-line">
-                <span className="block text-base font-bold text-[#b91c1c]">
-                  {enrichedSessions.filter((s) => s.hasConflict).length}
-                </span>
-                <span className="text-[9px] font-medium text-muted">Conflicts</span>
-              </div>
-              <div className="rounded-lg bg-white p-2 border border-line">
-                <span className="block text-base font-bold text-foreground">134</span>
-                <span className="text-[9px] font-medium text-muted">Students</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Card 2: Coach Utilization */}
-          <div className="rounded-xl border border-line bg-[#f8fafb] p-4 flex items-center justify-between">
-            <div>
-              <h4 className="font-semibold text-xs text-foreground">Coach Utilization</h4>
-              <p className="mt-2 text-sm font-bold text-foreground">8 / 10</p>
-              <p className="text-[11px] text-muted">Coaches scheduled</p>
-              <span className="mt-2 inline-block text-[11px] font-semibold text-[#007AFF] cursor-pointer hover:underline">
-                View Details
-              </span>
-            </div>
-            {/* Circular Gauge */}
-            <div className="relative size-16 flex items-center justify-center">
-              <svg className="size-full -rotate-90" viewBox="0 0 36 36">
-                <path
-                  className="text-[#e2e8f0]"
-                  strokeWidth="3.5"
-                  stroke="currentColor"
-                  fill="none"
-                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                />
-                <path
-                  className="text-[#007AFF]"
-                  strokeDasharray="80, 100"
-                  strokeWidth="3.5"
-                  strokeLinecap="round"
-                  stroke="currentColor"
-                  fill="none"
-                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                />
-              </svg>
-              <span className="absolute text-xs font-bold text-foreground">80%</span>
-            </div>
-          </div>
-
-          {/* Card 3: Facilities Usage */}
-          <div className="rounded-xl border border-line bg-[#f8fafb] p-4 flex items-center justify-between">
-            <div>
-              <h4 className="font-semibold text-xs text-foreground">Facilities Usage</h4>
-              <p className="mt-2 text-sm font-bold text-foreground">6 / 8</p>
-              <p className="text-[11px] text-muted">Facilities in use</p>
-              <span className="mt-2 inline-block text-[11px] font-semibold text-[#007AFF] cursor-pointer hover:underline">
-                View Details
-              </span>
-            </div>
-            {/* Circular Gauge */}
-            <div className="relative size-16 flex items-center justify-center">
-              <svg className="size-full -rotate-90" viewBox="0 0 36 36">
-                <path
-                  className="text-[#e2e8f0]"
-                  strokeWidth="3.5"
-                  stroke="currentColor"
-                  fill="none"
-                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                />
-                <path
-                  className="text-[#10b981]"
-                  strokeDasharray="75, 100"
-                  strokeWidth="3.5"
-                  strokeLinecap="round"
-                  stroke="currentColor"
-                  fill="none"
-                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                />
-              </svg>
-              <span className="absolute text-xs font-bold text-foreground">75%</span>
-            </div>
-          </div>
-
-          {/* Card 4: Upcoming Alerts */}
-          <div className="rounded-xl border border-line bg-[#f8fafb] p-4">
-            <div className="flex items-center justify-between">
-              <h4 className="font-semibold text-xs text-foreground">Upcoming</h4>
-              <span className="text-[10px] font-semibold text-[#007AFF] cursor-pointer hover:underline">View All</span>
-            </div>
-            <div className="mt-2.5 space-y-2 text-xs">
-              <div className="flex items-start gap-2">
-                <span className="font-bold text-[#b91c1c]">⚠️ 2</span>
-                <span className="text-muted leading-tight">
-                  Coach unavailable <span className="block text-[10px]">Oct 28, 4:00 PM · U12 Cricket</span>
-                </span>
-              </div>
-              <div className="flex items-start gap-2">
-                <span className="font-bold text-[#eab308]">🛠️ 1</span>
-                <span className="text-muted leading-tight">
-                  Facility maintenance <span className="block text-[10px]">Nov 1, 8:00 AM · Main Ground</span>
-                </span>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
 

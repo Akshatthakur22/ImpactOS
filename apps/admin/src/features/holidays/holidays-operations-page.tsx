@@ -219,8 +219,8 @@ export default function HolidaysOperationsPage() {
         </div>
 
         {/* RIGHT COLUMN: HOLIDAYS TABLE (Screen 6 in Reference Image) */}
-        <div className="rounded-2xl border border-line bg-white shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between border-b border-line p-4">
+        <div className="rounded-2xl border border-line bg-white shadow-sm overflow-hidden flex flex-col max-h-[calc(100vh-240px)]">
+          <div className="shrink-0 flex items-center justify-between border-b border-line p-4">
             <div>
               <h3 className="text-base font-bold text-foreground">Academy Holidays & Closures</h3>
               <p className="text-xs text-muted mt-0.5">Automated session cancellation and notification rules.</p>
@@ -236,9 +236,9 @@ export default function HolidaysOperationsPage() {
             )}
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="overflow-auto flex-1">
             <table className="w-full min-w-[600px] text-left text-xs">
-              <thead className="bg-[#f8fafb] text-[11px] font-semibold uppercase tracking-wider text-muted border-b border-line">
+              <thead className="sticky top-0 z-10 bg-[#f8fafb] text-[11px] font-semibold uppercase tracking-wider text-muted border-b border-line shadow-xs">
                 <tr>
                   <th className="px-5 py-3.5">Date</th>
                   <th className="px-4 py-3.5">Title</th>

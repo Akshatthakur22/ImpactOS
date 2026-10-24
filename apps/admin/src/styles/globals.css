@@ -256,6 +256,7 @@ button:disabled {
   display: none;
 }
 
+
 @media (max-width: 640px) {
   .sd-page {
     padding-top: 22px;

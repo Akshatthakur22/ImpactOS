@@ -22,6 +22,7 @@ export type IconName =
   | "plus"
   | "arrow-right"
   | "refresh"
+  | "filter"
   | "more";
 
 const paths: Record<IconName, React.ReactNode> = {
@@ -46,6 +47,7 @@ const paths: Record<IconName, React.ReactNode> = {
   plus: <><path d="M12 5v14M5 12h14"/></>,
   "arrow-right": <><path d="M4 12h15M13 6l6 6-6 6"/></>,
   refresh: <><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.5 9a7 7 0 0 1 11.8-2L20 12M4 12l2.7 5a7 7 0 0 0 11.8-2"/></>,
+  filter: <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>,
   more: <><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></>,
 };
 

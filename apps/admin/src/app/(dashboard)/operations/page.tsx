@@ -21,6 +21,7 @@ export default async function OperationsPage({
     <WorkspaceModule
       title="Operations Center"
       description="Schedule • Manage • Track • Keep Your Academy Running Smoothly"
+      hideTabs
       {...(initial ? { initialTab: initial } : { initialTab: "calendar" })}
       tabs={[
         {

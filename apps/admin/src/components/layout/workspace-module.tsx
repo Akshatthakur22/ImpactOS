@@ -20,11 +20,13 @@ export function WorkspaceModule({
   description,
   initialTab,
   tabs,
+  hideTabs = false,
 }: {
   title: string;
   description: string;
   initialTab?: string;
   tabs: WorkspaceTab[];
+  hideTabs?: boolean;
 }) {
   const { user } = useAuth();
   const router = useRouter();
@@ -48,6 +50,12 @@ export function WorkspaceModule({
       ? requestedTab
       : (visibleTabs[0]?.id ?? ""));
   const activeContent = visibleTabs.find((tab) => tab.id === activeTab)?.content;
+
+  useEffect(() => {
+    if (initialTab) {
+      setRequestedTab(initialTab);
+    }
+  }, [initialTab]);
 
   useEffect(() => {
     const syncTab = (event?: Event) => {
@@ -74,53 +82,64 @@ export function WorkspaceModule({
   }
 
   return (
-    <section className="mx-auto w-full max-w-[1440px] px-4 py-4 sm:px-7 sm:py-6 xl:px-10">
-      <PageHeader title={title} description={description} />
-      <div className="border-b border-[#E5E5EA]">
-        <div className="flex gap-1 overflow-x-auto" role="tablist" aria-label={`${title} sections`}>
-          {visibleTabs.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              id={`${title.toLowerCase().replaceAll(" ", "-")}-${tab.id}-tab`}
-              aria-selected={activeTab === tab.id}
-              aria-controls={`${title.toLowerCase().replaceAll(" ", "-")}-${tab.id}-panel`}
-              onClick={() => {
-                selectTab(tab.id);
-              }}
-              onKeyDown={(event) => {
-                if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-                event.preventDefault();
-                const currentIndex = visibleTabs.findIndex((item) => item.id === activeTab);
-                const delta = event.key === "ArrowRight" ? 1 : -1;
-                const next = visibleTabs[(currentIndex + delta + visibleTabs.length) % visibleTabs.length];
-                if (!next) return;
-                selectTab(next.id);
-                document.getElementById(`${title.toLowerCase().replaceAll(" ", "-")}-${next.id}-tab`)?.focus();
-              }}
-              tabIndex={activeTab === tab.id ? 0 : -1}
-              className={`flex items-center gap-2 whitespace-nowrap border-b-2 px-3.5 py-2.5 text-[13px] transition-colors sm:px-4 ${
-                activeTab === tab.id
-                  ? "border-[#007AFF] font-semibold text-[#007AFF]"
-                  : "border-transparent text-[#6E6E73] hover:text-[#1D1D1F]"
-              }`}
-            >
-              {tab.icon}
-              {tab.label}
-            </button>
-          ))}
+    <section className="flex flex-col flex-1 min-h-0 w-full max-w-[1600px] mx-auto px-4 py-2 sm:px-6 pb-4">
+      <PageHeader
+        title={hideTabs ? (visibleTabs.find((t) => t.id === activeTab)?.label ?? title) : title}
+        description={description}
+      />
+      {!hideTabs && (
+        <div className="shrink-0 border-b border-[#E5E5EA] bg-white sticky top-0 z-20">
+          <div className="flex gap-1 overflow-x-auto" role="tablist" aria-label={`${title} sections`}>
+            {visibleTabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                id={`${title.toLowerCase().replaceAll(" ", "-")}-${tab.id}-tab`}
+                aria-selected={activeTab === tab.id}
+                aria-controls={`${title.toLowerCase().replaceAll(" ", "-")}-${tab.id}-panel`}
+                onClick={() => {
+                  selectTab(tab.id);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+                  event.preventDefault();
+                  const currentIndex = visibleTabs.findIndex((item) => item.id === activeTab);
+                  const delta = event.key === "ArrowRight" ? 1 : -1;
+                  const next = visibleTabs[(currentIndex + delta + visibleTabs.length) % visibleTabs.length];
+                  if (!next) return;
+                  selectTab(next.id);
+                  document.getElementById(`${title.toLowerCase().replaceAll(" ", "-")}-${next.id}-tab`)?.focus();
+                }}
+                tabIndex={activeTab === tab.id ? 0 : -1}
+                className={`flex items-center gap-2 whitespace-nowrap border-b-2 px-3.5 py-2.5 text-[13px] transition-colors sm:px-4 ${
+                  activeTab === tab.id
+                    ? "border-[#007AFF] font-semibold text-[#007AFF]"
+                    : "border-transparent text-[#6E6E73] hover:text-[#1D1D1F]"
+                }`}
+              >
+                {tab.icon}
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
-      {activeContent ? <div
-        className="workspace-panel mt-1"
-        role="tabpanel"
-        id={`${title.toLowerCase().replaceAll(" ", "-")}-${activeTab}-panel`}
-        aria-labelledby={`${title.toLowerCase().replaceAll(" ", "-")}-${activeTab}-tab`}
-        tabIndex={0}
-      >
-        {activeContent}
-      </div> : <div className="mt-6 rounded-2xl border border-dashed border-[#d7dfda] bg-white p-8 text-center text-sm text-[#718079]">You do not have access to any sections in this workspace.</div>}
+      )}
+      {activeContent ? (
+        <div
+          className="workspace-panel flex-1 min-h-0 pt-2 transition-opacity duration-150 animate-in fade-in"
+          role="tabpanel"
+          id={`${title.toLowerCase().replaceAll(" ", "-")}-${activeTab}-panel`}
+          aria-labelledby={`${title.toLowerCase().replaceAll(" ", "-")}-${activeTab}-tab`}
+          tabIndex={0}
+        >
+          {activeContent}
+        </div>
+      ) : (
+        <div className="mt-6 rounded-2xl border border-dashed border-[#d7dfda] bg-white p-8 text-center text-sm text-[#718079]">
+          You do not have access to any sections in this workspace.
+        </div>
+      )}
     </section>
   );
 }

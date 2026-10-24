@@ -250,10 +250,10 @@ export default function FacilitiesOperationsPage() {
       </div>
 
       {/* COMPACT TABLE (Screen 3 in Reference Image) */}
-      <div className="overflow-hidden rounded-2xl border border-line bg-white shadow-sm">
-        <div className="overflow-x-auto">
+      <div className="overflow-hidden rounded-2xl border border-line bg-white shadow-sm flex flex-col max-h-[calc(100vh-240px)]">
+        <div className="overflow-auto flex-1">
           <table className="w-full min-w-[850px] text-left text-xs">
-            <thead className="bg-[#f8fafb] text-[11px] font-semibold uppercase tracking-wider text-muted border-b border-line">
+            <thead className="sticky top-0 z-10 bg-[#f8fafb] text-[11px] font-semibold uppercase tracking-wider text-muted border-b border-line shadow-xs">
               <tr>
                 <th className="px-5 py-3.5">Facility</th>
                 <th className="px-4 py-3.5">Type</th>
