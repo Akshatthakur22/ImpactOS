@@ -15,9 +15,9 @@ const blankCoachForm = {
   email: "",
   password: "",
   phone: "",
-  specializations: "Cricket, Conditioning",
-  qualifications: "National Coaching Certificate, First Aid",
-  availability: "Mon - Sat",
+  specializations: "Skating, Physical Fitness",
+  qualifications: "BPES (Bachelor of Physical Education and Sports)",
+  availability: "Mon - Fri",
   workload: "80",
 };
 
@@ -87,13 +87,7 @@ export default function CoachesOperationsPage() {
       const specialization =
         coach.specializations.length > 0
           ? coach.specializations[0]!
-          : index === 0
-            ? "Cricket"
-            : index === 1
-              ? "Football"
-              : index === 2
-                ? "Fitness"
-                : "Multi-Sport";
+          : "Multi-Sport";
 
       // Availability text
       const availability = index % 3 === 0 ? "Mon – Sat" : "Mon – Fri";
@@ -185,11 +179,15 @@ export default function CoachesOperationsPage() {
             onChange={(e) => setSportFilter(e.target.value)}
           >
             <option value="all">All Sports</option>
-            <option value="Cricket">Cricket</option>
-            <option value="Football">Football</option>
-            <option value="Fitness">Fitness</option>
+            <option value="Skating">Skating</option>
             <option value="Yoga">Yoga</option>
-            <option value="Swimming">Swimming</option>
+            <option value="Gymnastics">Gymnastics</option>
+            <option value="Martial Arts">Martial Arts</option>
+            <option value="Wushu">Wushu</option>
+            <option value="Football">Football</option>
+            <option value="Chess">Chess</option>
+            <option value="Athletics">Athletics</option>
+            <option value="Fitness">Physical Fitness</option>
           </select>
 
           {/* All Statuses */}
@@ -394,7 +392,7 @@ export default function CoachesOperationsPage() {
                 <label className="block font-medium">
                   Specializations (comma separated)
                   <Input
-                    placeholder="Cricket, Fielding, Conditioning"
+                    placeholder="Skating, Gymnastics, Yoga"
                     value={form.specializations}
                     onChange={(e) => setForm({ ...form, specializations: e.target.value })}
                     className="mt-1 h-9 text-xs"

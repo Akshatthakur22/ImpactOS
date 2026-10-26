@@ -1,4 +1,4 @@
-import { and, eq, ilike, inArray } from "drizzle-orm";
+import { and, eq, ilike, inArray, sql } from "drizzle-orm";
 import { config } from "dotenv";
 import { resolve } from "node:path";
 import { loadEnv } from "../config/env.js";
@@ -31,8 +31,125 @@ import { academyLocalDateTimeToUtc } from "../modules/operations/academy-time.js
 
 config({ path: resolve(process.cwd(), "../../.env") });
 
-const DEMO_PASSWORD = "ImpactDemo!2026";
-const coachNames = ["Aarav Mehta", "Mira Kapoor", "Kabir Rao", "Nisha Verma"];
+const DEMO_PASSWORD = "ImpactCoach!2026";
+
+/* ─── Real Coach Data ─────────────────────────────────────────────────────── */
+
+interface CoachSeed {
+  name: string;
+  email: string;
+  phone: string;
+  specializations: string[];
+  qualifications: string[];
+  yearsExperience: number;
+  emergencyContactName: string;
+  emergencyContactPhone: string;
+}
+
+const coachSeeds: CoachSeed[] = [
+  {
+    name: "Tushar Hirwani",
+    email: "tusharhirve143@gmail.com",
+    phone: "+91 74153 66508",
+    specializations: ["Skating", "Physical Fitness"],
+    qualifications: ["BPES (Bachelor of Physical Education and Sports)"],
+    yearsExperience: 8,
+    emergencyContactName: "Maya",
+    emergencyContactPhone: "+91 73546 06489",
+  },
+  {
+    name: "Pankaj Sonwani",
+    email: "pankajsonwani07@gmail.com",
+    phone: "+91 87700 54037",
+    specializations: ["Yoga", "Fitness", "Martial Arts", "Football"],
+    qualifications: ["B.E. (Bachelor of Engineering)", "B.P.Ed. (Pursuing)"],
+    yearsExperience: 1,
+    emergencyContactName: "Pankaj Sonwani",
+    emergencyContactPhone: "+91 87700 54037",
+  },
+  {
+    name: "Ashish Sahu",
+    email: "ashishsahu856@gmail.com",
+    phone: "+91 74157 57123",
+    specializations: ["Skating", "Physical Fitness"],
+    qualifications: ["BPES (Bachelor of Physical Education and Sports)"],
+    yearsExperience: 8,
+    emergencyContactName: "Ashish Sahu",
+    emergencyContactPhone: "+91 74157 57123",
+  },
+  {
+    name: "Pradhum Bhagore",
+    email: "princebhargav195@gmail.com",
+    phone: "+91 63500 42378",
+    specializations: ["Gymnastics", "Calisthenics", "Yoga", "Martial Arts", "Physical Fitness"],
+    qualifications: ["BPES (Bachelor of Physical Education and Sports)"],
+    yearsExperience: 8,
+    emergencyContactName: "Pradhum Bhagore",
+    emergencyContactPhone: "+91 63500 42378",
+  },
+  {
+    name: "Ajay Vishwakarma",
+    email: "ajaykarma25@gmail.com",
+    phone: "+91 78050 04934",
+    specializations: ["Wushu", "Physical Fitness"],
+    qualifications: ["BPES (Bachelor of Physical Education and Sports)"],
+    yearsExperience: 6,
+    emergencyContactName: "Maya",
+    emergencyContactPhone: "+91 78050 04934",
+  },
+  {
+    name: "Kushal Bhagat",
+    email: "ribhu.yog@gmail.com",
+    phone: "+91 94066 51419",
+    specializations: ["Yoga", "Nutrition", "Basic Naturopathy"],
+    qualifications: [
+      "BPES Yoga",
+      "MA Yoga (Pursuing)",
+      "NIOS Yoga Certificate",
+      "SVYASA Bangalore TTC Yoga",
+      "JVBI TTC Yoga",
+      "MP Yogasana Sports Association Yoga Judge",
+      "MSME Naturopathy & Yoga",
+      "IFSI Mumbai Nutritionist",
+    ],
+    yearsExperience: 9,
+    emergencyContactName: "Hemant Bhagat",
+    emergencyContactPhone: "+91 94066 51419",
+  },
+  {
+    name: "Saurabh Mishra",
+    email: "mishraji917@gmail.com",
+    phone: "+91 84630 33247",
+    specializations: ["Chess"],
+    qualifications: ["B.Sc. Mathematics", "PGDCA (Post Graduation Diploma in Computer Application)"],
+    yearsExperience: 2,
+    emergencyContactName: "Saurabh Mishra",
+    emergencyContactPhone: "+91 84630 33247",
+  },
+  {
+    name: "Bhavesh Banodha",
+    email: "banodhaa861@gmail.com",
+    phone: "+91 92855 17087",
+    specializations: ["Gymnastics"],
+    qualifications: ["B.Com Graduate", "CA (Pursuing)"],
+    yearsExperience: 5,
+    emergencyContactName: "Bhavesh Banodha",
+    emergencyContactPhone: "+91 92855 17087",
+  },
+  {
+    name: "Deepak Kandare",
+    email: "deepakkandare3@gmail.com",
+    phone: "+91 88891 12825",
+    specializations: ["Athletics", "Kho-Kho", "Physical Fitness"],
+    qualifications: ["BPES (Bachelor of Physical Education and Sports) (Pursuing)"],
+    yearsExperience: 12,
+    emergencyContactName: "Deepak Kandare",
+    emergencyContactPhone: "+91 88891 12825",
+  },
+];
+
+const coachNames = coachSeeds.map((c) => c.name);
+
 const parentNames = ["Ananya Sharma", "Rohan Iyer", "Priya Nair", "Dev Patel"];
 const studentNames = [
   ["Aanya", "Sharma"],
@@ -41,13 +158,21 @@ const studentNames = [
   ["Sana", "Nair"],
   ["Arjun", "Patel"],
 ] as const;
+
+/* ─── Disciplines, Programs & Batches ──────────────────────────────────── */
+
 const disciplinesSeed = [
-  { name: "Demo Wushu", program: "Foundations", batches: ["Juniors", "Seniors"] },
-  { name: "Demo Gymnastics", program: "Movement Basics", batches: ["Level 1"] },
-  { name: "Demo Yoga", program: "Kids Yoga", batches: ["Saturday Group"] },
+  { name: "Skating", program: "Skating & Physical Fitness", batches: ["Shalimar Palm Batch", "Bengali Square Batch"] },
+  { name: "Yoga", program: "Yoga - Beginner to Advance", batches: ["Bengali Square Yoga"] },
+  { name: "Martial Arts & Football", program: "Fitness & Combat Sports", batches: ["EuroKids Batch"] },
+  { name: "Gymnastics", program: "Gymnastics & Calisthenics", batches: ["Bengali Square Gymnastics", "EuroKids Gymnastics"] },
+  { name: "Wushu", program: "Wushu & Physical Fitness", batches: ["Morning Wushu Batch"] },
+  { name: "Chess", program: "Chess - Elementary to Advanced", batches: ["Afternoon Chess Batch"] },
+  { name: "Athletics & Kho-Kho", program: "Athletics & Multi-Sport", batches: ["Morning Athletics Batch"] },
 ] as const;
+
 const demoEmails = [
-  ...coachNames.map((_, index) => `demo.coach${index + 1}@example.test`),
+  ...coachSeeds.map((c) => c.email),
   ...parentNames.map((_, index) => `demo.parent${index + 1}@example.test`),
 ];
 
@@ -77,8 +202,8 @@ async function seed() {
       const demoCoachUsers = await database.db
         .select({ id: users.id, academyId: users.academyId })
         .from(users)
-        .where(inArray(users.email, demoEmails.slice(0, coachNames.length)));
-      if (demoCoachUsers.length !== coachNames.length) {
+        .where(inArray(users.email, demoEmails.slice(0, coachSeeds.length)));
+      if (demoCoachUsers.length !== coachSeeds.length) {
         throw new Error("Some demo accounts already exist. Refusing to create a partial dataset.");
       }
       const demoCoachIds = demoCoachUsers.map((user) => user.id);
@@ -210,15 +335,17 @@ async function seed() {
     const passwordHash = await passwordHasher.hash(DEMO_PASSWORD);
     const now = new Date();
     const created = await database.db.transaction(async (tx) => {
+      /* ─── Create Coach User Accounts & Profiles ───────────────────── */
       const coachUsers: string[] = [];
-      for (let index = 0; index < coachNames.length; index += 1) {
+      for (let index = 0; index < coachSeeds.length; index += 1) {
+        const coach = coachSeeds[index]!;
         const [user] = await tx
           .insert(users)
           .values({
             academyId: owner.academyId,
-            email: `demo.coach${index + 1}@example.test`,
+            email: coach.email,
             passwordHash,
-            displayName: coachNames[index]!,
+            displayName: coach.name,
             role: "coach",
           })
           .returning({ id: users.id });
@@ -227,16 +354,17 @@ async function seed() {
         await tx.insert(coachProfiles).values({
           academyId: owner.academyId,
           userId: user.id,
-          specializations: [
-            ["Wushu", "Youth conditioning"],
-            ["Wushu", "Forms"],
-            ["Gymnastics", "Mobility"],
-            ["Yoga", "Breathwork"],
-          ][index]!,
+          phone: coach.phone,
+          emergencyContactName: coach.emergencyContactName,
+          emergencyContactPhone: coach.emergencyContactPhone,
+          qualifications: coach.qualifications,
+          yearsExperience: coach.yearsExperience,
+          specializations: coach.specializations,
           createdBy: owner.id,
         });
       }
 
+      /* ─── Create Parent Accounts ──────────────────────────────────── */
       const parentUsers: string[] = [];
       const parentRows = [];
       for (let index = 0; index < parentNames.length; index += 1) {
@@ -267,61 +395,145 @@ async function seed() {
         parentRows.push(guardian.id);
       }
 
+      /* ─── Create Disciplines, Programs & Batches ──────────────────── */
       const batchIds: string[] = [];
       for (const disciplineSeed of disciplinesSeed) {
-        const [discipline] = await tx
-          .insert(disciplines)
-          .values({ academyId: owner.academyId, name: disciplineSeed.name, createdBy: owner.id })
-          .returning({ id: disciplines.id });
-        if (!discipline) throw new Error("Could not create demo discipline.");
-        const [program] = await tx
-          .insert(programs)
-          .values({
-            academyId: owner.academyId,
-            disciplineId: discipline.id,
-            name: disciplineSeed.program,
-            createdBy: owner.id,
-          })
-          .returning({ id: programs.id });
-        if (!program) throw new Error("Could not create demo program.");
-        for (const batchName of disciplineSeed.batches) {
-          const [batch] = await tx
-            .insert(batches)
+        let disciplineId: string;
+        const [existingDiscipline] = await tx
+          .select({ id: disciplines.id })
+          .from(disciplines)
+          .where(
+            and(
+              eq(disciplines.academyId, owner.academyId),
+              sql`lower(${disciplines.name}) = lower(${disciplineSeed.name})`,
+            ),
+          )
+          .limit(1);
+
+        if (existingDiscipline) {
+          disciplineId = existingDiscipline.id;
+        } else {
+          const [discipline] = await tx
+            .insert(disciplines)
+            .values({ academyId: owner.academyId, name: disciplineSeed.name, createdBy: owner.id })
+            .returning({ id: disciplines.id });
+          if (!discipline) throw new Error("Could not create demo discipline.");
+          disciplineId = discipline.id;
+        }
+
+        let programId: string;
+        const [existingProgram] = await tx
+          .select({ id: programs.id })
+          .from(programs)
+          .where(
+            and(
+              eq(programs.academyId, owner.academyId),
+              eq(programs.disciplineId, disciplineId),
+              sql`lower(${programs.name}) = lower(${disciplineSeed.program})`,
+            ),
+          )
+          .limit(1);
+
+        if (existingProgram) {
+          programId = existingProgram.id;
+        } else {
+          const [program] = await tx
+            .insert(programs)
             .values({
               academyId: owner.academyId,
-              programId: program.id,
-              name: `Demo ${batchName}`,
-              capacity: 16,
+              disciplineId,
+              name: disciplineSeed.program,
               createdBy: owner.id,
             })
-            .returning({ id: batches.id });
-          if (!batch) throw new Error("Could not create demo batch.");
-          batchIds.push(batch.id);
+            .returning({ id: programs.id });
+          if (!program) throw new Error("Could not create demo program.");
+          programId = program.id;
+        }
+
+        for (const batchName of disciplineSeed.batches) {
+          const fullName = `Demo ${batchName}`;
+          const [existingBatch] = await tx
+            .select({ id: batches.id })
+            .from(batches)
+            .where(
+              and(
+                eq(batches.academyId, owner.academyId),
+                eq(batches.programId, programId),
+                sql`lower(${batches.name}) = lower(${fullName})`,
+              ),
+            )
+            .limit(1);
+
+          if (existingBatch) {
+            batchIds.push(existingBatch.id);
+          } else {
+            const [batch] = await tx
+              .insert(batches)
+              .values({
+                academyId: owner.academyId,
+                programId,
+                name: fullName,
+                capacity: 16,
+                createdBy: owner.id,
+              })
+              .returning({ id: batches.id });
+            if (!batch) throw new Error("Could not create demo batch.");
+            batchIds.push(batch.id);
+          }
         }
       }
+
+      /* ─── Assign Coaches to Batches ───────────────────────────────── */
+      /*
+       * Batch index mapping (matches disciplinesSeed order):
+       *  0 = Skating > Shalimar Palm Batch      → Coach 0 (Tushar) & Coach 2 (Ashish)
+       *  1 = Skating > Bengali Square Batch      → Coach 0 (Tushar) & Coach 2 (Ashish)
+       *  2 = Yoga > Bengali Square Yoga          → Coach 5 (Kushal)
+       *  3 = Martial Arts > EuroKids Batch       → Coach 1 (Pankaj)
+       *  4 = Gymnastics > Bengali Sq Gymnastics  → Coach 3 (Pradhum)
+       *  5 = Gymnastics > EuroKids Gymnastics    → Coach 7 (Bhavesh)
+       *  6 = Wushu > Morning Wushu Batch         → Coach 4 (Ajay)
+       *  7 = Chess > Afternoon Chess Batch       → Coach 6 (Saurabh)
+       *  8 = Athletics > Morning Athletics Batch → Coach 8 (Deepak)
+       */
+      const batchCoachAssignments: number[][] = [
+        [0, 2],  // Shalimar Palm Skating → Tushar + Ashish
+        [0, 2],  // Bengali Square Skating → Tushar + Ashish
+        [5],     // Bengali Square Yoga → Kushal
+        [1],     // EuroKids Martial Arts & Football → Pankaj
+        [3],     // Bengali Square Gymnastics → Pradhum
+        [7],     // EuroKids Gymnastics → Bhavesh
+        [4],     // Morning Wushu → Ajay
+        [6],     // Afternoon Chess → Saurabh
+        [8],     // Morning Athletics → Deepak
+      ];
 
       const profileRows = await tx
         .select({ id: coachProfiles.id, userId: coachProfiles.userId })
         .from(coachProfiles)
         .where(eq(coachProfiles.academyId, owner.academyId));
       const demoProfiles = profileRows.filter((profile) => coachUsers.includes(profile.userId));
-      if (demoProfiles.length !== 4) throw new Error("Demo coach profiles missing.");
+      if (demoProfiles.length !== coachSeeds.length) throw new Error("Demo coach profiles missing.");
       const assignedProfileIds = coachUsers.map(
         (userId) => demoProfiles.find((profile) => profile.userId === userId)!.id,
       );
-      const batchCoachAssignments = [0, 0, 1, 3];
-      for (let index = 0; index < batchIds.length; index += 1) {
-        const coachProfileId = assignedProfileIds[batchCoachAssignments[index] ?? 3]!;
-        await tx.insert(batchCoaches).values({
-          academyId: owner.academyId,
-          batchId: batchIds[index]!,
-          coachId: coachProfileId,
-          createdBy: owner.id,
-        });
+
+      for (let batchIndex = 0; batchIndex < batchIds.length; batchIndex += 1) {
+        const coachIndexes = batchCoachAssignments[batchIndex] ?? [0];
+        for (const coachIdx of coachIndexes) {
+          const coachProfileId = assignedProfileIds[coachIdx]!;
+          await tx.insert(batchCoaches).values({
+            academyId: owner.academyId,
+            batchId: batchIds[batchIndex]!,
+            coachId: coachProfileId,
+            createdBy: owner.id,
+          });
+        }
       }
 
+      /* ─── Create Students ─────────────────────────────────────────── */
       const studentIds: string[] = [];
-      const studentBatchIndexes = [0, 0, 1, 2, 3];
+      const studentBatchIndexes = [0, 0, 3, 2, 6];
       for (let index = 0; index < studentNames.length; index += 1) {
         const [firstName, lastName] = studentNames[index]!;
         const [student] = await tx
@@ -353,14 +565,44 @@ async function seed() {
         });
       }
 
-      const schedules = [];
-      const weekdays = [1, 3, 2, 6];
-      const timeSlots = [
+      /* ─── Create Schedules ────────────────────────────────────────── */
+      /*
+       * Real training times:
+       *  Skating (batch 0,1): Mon-Fri 18:00-19:00
+       *  Yoga (batch 2): Mon-Fri 18:00-19:00
+       *  Martial Arts (batch 3): Mon-Fri 17:00-18:00
+       *  Gymnastics Bengali Sq (batch 4): Mon-Fri 17:00-18:00
+       *  Gymnastics EuroKids (batch 5): Mon-Fri 17:00-18:00
+       *  Wushu (batch 6): Mon-Fri 07:00-08:00
+       *  Chess (batch 7): Mon-Fri 15:40-16:50
+       *  Athletics (batch 8): Mon-Fri 07:00-08:00
+       *
+       * We seed one schedule entry per batch using a rotating weekday.
+       */
+      const venues = [
+        "Shalimar Palm, Scheme No. 140",
+        "Impact Fit Academy, Bengali Square",
+        "Bengali Square, Near Jain Mandir Road, Sukh Shanti Nagar",
+        "EuroKids School, Scheme No. 140, Behind JMB",
+        "Bengali Square, Near Jain Mandir Road, Sukh Shanti Nagar",
+        "EuroKids School, Scheme No. 140, Behind JMB",
+        "Impact Fit Academy, Bengali Square",
+        "Bengali Square, Near Jain Mandir Road, Sukh Shanti Nagar",
+        "Impact Fit Academy, Bengali Square",
+      ];
+      const weekdays = [1, 3, 2, 4, 5, 1, 3, 2, 4];
+      const timeSlots: readonly (readonly [string, string])[] = [
+        ["18:00", "19:00"],
+        ["18:00", "19:00"],
+        ["18:00", "19:00"],
         ["17:00", "18:00"],
         ["17:00", "18:00"],
-        ["16:00", "17:00"],
-        ["09:00", "10:00"],
-      ] as const;
+        ["17:00", "18:00"],
+        ["07:00", "08:00"],
+        ["15:40", "16:50"],
+        ["07:00", "08:00"],
+      ];
+      const scheduleIds = [];
       for (let index = 0; index < batchIds.length; index += 1) {
         const [schedule] = await tx
           .insert(batchSchedules)
@@ -370,14 +612,15 @@ async function seed() {
             dayOfWeek: weekdays[index]!,
             startTime: timeSlots[index]![0],
             endTime: timeSlots[index]![1],
-            venue: index === 3 ? "Studio B" : "Main Hall",
+            venue: venues[index]!,
             createdBy: owner.id,
           })
           .returning({ id: batchSchedules.id });
         if (!schedule) throw new Error("Could not create demo schedule.");
-        schedules.push(schedule.id);
+        scheduleIds.push(schedule.id);
       }
 
+      /* ─── Create Training Sessions ────────────────────────────────── */
       const today = new Date();
       const todayUtc = new Date(
         Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()),
@@ -411,10 +654,10 @@ async function seed() {
             .values({
               academyId: owner.academyId,
               batchId: batchIds[batchIndex]!,
-              scheduleId: schedules[batchIndex]!,
+              scheduleId: scheduleIds[batchIndex]!,
               startsAt,
               endsAt,
-              venue: batchIndex === 3 ? "Studio B" : "Main Hall",
+              venue: venues[batchIndex]!,
               status: isPast ? "completed" : "scheduled",
               createdBy: owner.id,
             })
@@ -429,11 +672,14 @@ async function seed() {
         }
       }
 
+      /* ─── Attendance & Coach Presence for Past Sessions ───────────── */
       for (const session of pastSessions) {
+        // Use the first coach assigned to this batch for presence/attendance
+        const primaryCoachIdx = (batchCoachAssignments[session.batchIndex] ?? [0])[0]!;
         await tx.insert(coachSessionPresence).values({
           academyId: owner.academyId,
           sessionId: session.id,
-          coachId: coachUsers[batchCoachAssignments[session.batchIndex] ?? 3]!,
+          coachId: coachUsers[primaryCoachIdx]!,
           checkedInAt: new Date(session.startsAt.getTime() - 5 * 60_000),
           checkedOutAt: new Date(session.endsAt.getTime() + 2 * 60_000),
         });
@@ -448,7 +694,7 @@ async function seed() {
             sessionId: session.id,
             studentId,
             status: attendanceStatus,
-            recordedBy: coachUsers[batchCoachAssignments[session.batchIndex] ?? 3]!,
+            recordedBy: coachUsers[primaryCoachIdx]!,
             recordedAt: session.endsAt,
           });
           if (
@@ -459,7 +705,7 @@ async function seed() {
               academyId: owner.academyId,
               studentId,
               sessionId: session.id,
-              coachId: coachUsers[batchCoachAssignments[session.batchIndex] ?? 3]!,
+              coachId: coachUsers[primaryCoachIdx]!,
               assessmentName: "Weekly coach feedback",
               value: "Good progress",
               coachNote:
@@ -472,6 +718,7 @@ async function seed() {
         }
       }
 
+      /* ─── Finance: Fee Charges & Payments ─────────────────────────── */
       await tx.insert(financeCounters).values({ academyId: owner.academyId }).onConflictDoNothing();
       const invoiceRows = [];
       for (let index = 0; index < studentIds.length; index += 1) {
@@ -507,6 +754,7 @@ async function seed() {
         });
       }
 
+      /* ─── Expenses & Announcement ─────────────────────────────────── */
       await tx.insert(academyExpenses).values({
         academyId: owner.academyId,
         category: "Demo equipment",
@@ -543,10 +791,10 @@ async function seed() {
       };
     });
 
-    console.log("Synthetic SportDesk demo data created:");
+    console.log("Impact Fit Academy demo data created:");
     console.log(JSON.stringify(created, null, 2));
     console.log(`Shared demo password: ${DEMO_PASSWORD}`);
-    console.log("Coach: demo.coach1@example.test through demo.coach4@example.test");
+    console.log("Coaches created:", coachSeeds.map((c) => `${c.name} (${c.email})`));
     console.log("Parent: demo.parent1@example.test through demo.parent4@example.test");
   } finally {
     await database.close();
